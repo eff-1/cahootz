@@ -1,0 +1,4 @@
+digraph{ graph [fontname="Carlito" bgcolor="white" pad=0.25 nodesep=0.35 ranksep=0.55]; node [fontname="Carlito" fontsize=16 shape=box style="rounded,filled" fillcolor="#EAF0FF" color="#2F6BFF" fontcolor="#0B1B3A" penwidth=1.2 margin="0.14,0.08"]; edge [fontname="Carlito" fontsize=13 color="#5B6478" fontcolor="#5B6478" arrowsize=0.7]; rankdir=LR; nodesep=0.25; ranksep=0.6;
+users->community_members; communities->community_members; communities->discussions; users->conversations->messages;
+users->wallet_accounts->wallet_entries; users->xp_ledger; users->reports->moderation_actions; users->audit_logs;
+}

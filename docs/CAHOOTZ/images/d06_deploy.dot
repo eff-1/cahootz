@@ -1,0 +1,7 @@
+digraph{ graph [fontname="Carlito" bgcolor="white" pad=0.25 nodesep=0.35 ranksep=0.55]; node [fontname="Carlito" fontsize=12 shape=box style="rounded,filled" fillcolor="#EAF0FF" color="#2F6BFF" fontcolor="#0B1B3A" penwidth=1.2 margin="0.14,0.08"]; edge [fontname="Carlito" fontsize=10 color="#5B6478" fontcolor="#5B6478" arrowsize=0.7]; rankdir=TB;
+U[label="Users (browsers)" fillcolor="#0B1B3A" fontcolor=white]; CDN[label="CDN + WAF + DNS\n(static assets, DDoS shield)"];
+subgraph cluster_a{label="Stage 1 deployment (launch to ~1,000 active users)" fontname="Carlito" color="#2F6BFF" style="rounded";
+FE[label="Web frontend\n(Next.js on managed host)"]; BE[label="API + realtime container\n(2 instances behind load balancer)"]; WKR[label="Worker container\n(1 instance)"]; DB[label="Managed PostgreSQL\n(daily backups, PITR)" shape=cylinder]; RDS[label="Managed Redis" shape=cylinder];}
+OBJ[label="Object storage" shape=cylinder]; OBS[label="Observability\n(logs, metrics, traces, alerts)" fillcolor="white"]; EXT[label="Email, AI providers" fillcolor="white"];
+U->CDN; CDN->FE; CDN->BE[label="API / WSS"]; BE->DB; BE->RDS; WKR->DB; WKR->RDS; BE->OBJ; WKR->EXT; BE->OBS[style=dashed]; WKR->OBS[style=dashed];
+}

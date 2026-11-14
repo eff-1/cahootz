@@ -1,0 +1,683 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Identity ───────────────────────────────────────────────────────
+
+enum Role {
+  STUDENT
+  COMMUNITY_MODERATOR
+  PLATFORM_MODERATOR
+  PLATFORM_ADMIN
+  SUPER_ADMIN
+}
+
+enum Visibility {
+  PUBLIC
+  INSTITUTION
+  CONNECTIONS
+  PRIVATE
+}
+
+model User {
+  id              String         @id @default(uuid())
+  email           String         @unique
+  passwordHash    String
+  dateOfBirth     DateTime
+  isVerified      Boolean        @default(false)
+  isStaff         Boolean        @default(false)
+  totpSecret      String?
+  totpEnabled     Boolean        @default(false)
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+  deletedAt       DateTime?
+
+  profile         UserProfile?
+  authSessions    AuthSession[]
+  userRoles       UserRole[]
+  enrolments      StudentEnrolment[]
+  sentInvites     StudyInvitation[] @relation("SentInvitations")
+  receivedInvites StudyInvitation[] @relation("ReceivedInvitations")
+  hostSessions    StudySession[]    @relation("HostedSessions")
+  sessionParticipations StudyParticipant[]
+  sentSignals     AccountabilitySignal[] @relation("SentSignals")
+  targetSignals   AccountabilitySignal[] @relation("TargetSignals")
+  streak          StudyStreak?
+  reliability     ReliabilityRecord?
+  xpEntries       XpLedger[]
+  reportsFiled    Report[]          @relation("Reporter")
+  moderationActions ModerationAction[] @relation("TargetUser")
+  moderatedActions ModerationAction[] @relation("Moderator")
+  blockedUsers    UserBlock[]       @relation("Blocker")
+  blockedBy       UserBlock[]       @relation("Blocked")
+  auditLogs       AuditLog[]        @relation("Actor")
+  consentLogs     ConsentLog[]
+  communityMembers CommunityMember[]
+  discussions     Discussion[]
+  comments        Comment[]
+  conversations   ConversationMember[]
+  messages        Message[]
+
+  @@map("users")
+}
+
+model UserProfile {
+  id              String      @id @default(uuid())
+  userId          String      @unique
+  displayName     String
+  bio             String?
+  avatarUrl       String?
+  visibility      Visibility  @default(INSTITUTION)
+  isDiscoverable  Boolean     @default(true)
+  timezone        String      @default("Africa/Lagos")
+  institutionId   String?
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  user            User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  institution     Institution? @relation(fields: [institutionId], references: [id])
+
+  @@map("user_profiles")
+}
+
+model AuthSession {
+  id               String    @id @default(uuid())
+  userId           String
+  refreshTokenHash String    @unique
+  deviceName       String?
+  ipAddress        String?
+  userAgent        String?
+  isRevoked        Boolean   @default(false)
+  expiresAt        DateTime
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isRevoked])
+  @@map("auth_sessions")
+}
+
+model UserRole {
+  id        String   @id @default(uuid())
+  userId    String
+  role      Role
+  scope     String?  // null = global, or institutionId/communityId
+  createdAt DateTime @default(now())
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, role, scope])
+  @@map("user_roles")
+}
+
+// ─── Academic Architecture (Generic Org-Unit Tree) ──────────────────
+
+enum OrgUnitType {
+  FACULTY
+  SCHOOL
+  COLLEGE
+  DEPARTMENT
+  CENTRE
+}
+
+enum EnrolmentStatus {
+  SELF_DECLARED
+  VERIFIED
+}
+
+model Institution {
+  id          String         @id @default(uuid())
+  name        String
+  code        String         @unique
+  countryCode String         @default("NG")
+  website     String?
+  isVerified  Boolean        @default(true)
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  orgUnits    OrgUnit[]
+  levels      AcademicLevel[]
+  sessions    AcademicSession[]
+  courses     Course[]
+  profiles    UserProfile[]
+  communities Community[]
+
+  @@map("institutions")
+}
+
+model OrgUnit {
+  id            String       @id @default(uuid())
+  institutionId String
+  parentId      String?
+  name          String
+  unitType      OrgUnitType
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  institution   Institution  @relation(fields: [institutionId], references: [id], onDelete: Cascade)
+  parent        OrgUnit?     @relation("OrgUnitHierarchy", fields: [parentId], references: [id])
+  children      OrgUnit[]    @relation("OrgUnitHierarchy")
+  programmes    Programme[]
+
+  @@map("org_units")
+}
+
+model Programme {
+  id         String   @id @default(uuid())
+  orgUnitId  String
+  name       String
+  degreeType String   // B.Sc., B.Eng., MBBS, etc.
+  createdAt  DateTime @default(now())
+
+  orgUnit    OrgUnit  @relation(fields: [orgUnitId], references: [id], onDelete: Cascade)
+
+  @@map("programmes")
+}
+
+model AcademicLevel {
+  id            String            @id @default(uuid())
+  institutionId String
+  code          String            // 100, 200, Year 1
+  name          String
+  rank          Int
+  createdAt     DateTime          @default(now())
+
+  institution   Institution       @relation(fields: [institutionId], references: [id], onDelete: Cascade)
+  offerings     CourseOffering[]
+
+  @@unique([institutionId, code])
+  @@map("academic_levels")
+}
+
+model AcademicSession {
+  id            String    @id @default(uuid())
+  institutionId String
+  name          String    // e.g. "2026/2027"
+  startDate     DateTime
+  endDate       DateTime
+  createdAt     DateTime  @default(now())
+
+  institution   Institution @relation(fields: [institutionId], references: [id], onDelete: Cascade)
+  terms         Term[]
+
+  @@unique([institutionId, name])
+  @@map("academic_sessions")
+}
+
+model Term {
+  id                String          @id @default(uuid())
+  academicSessionId String
+  name              String          // "First Semester", "Harmattan"
+  termType          String          @default("SEMESTER")
+  startDate         DateTime
+  endDate           DateTime
+  createdAt         DateTime        @default(now())
+
+  academicSession   AcademicSession @relation(fields: [academicSessionId], references: [id], onDelete: Cascade)
+  courseOfferings   CourseOffering[]
+
+  @@map("terms")
+}
+
+model Course {
+  id            String           @id @default(uuid())
+  institutionId String
+  code          String           // "CSC 301"
+  title         String           // "Operating Systems"
+  credits       Int              @default(3)
+  description   String?
+  provenance    String           @default("OFFICIAL") // OFFICIAL, CURATED, COMMUNITY
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+
+  institution   Institution      @relation(fields: [institutionId], references: [id], onDelete: Cascade)
+  offerings     CourseOffering[]
+  studySessions StudySession[]
+  invitations   StudyInvitation[]
+
+  @@unique([institutionId, code])
+  @@index([institutionId, code])
+  @@map("courses")
+}
+
+model CourseOffering {
+  id              String             @id @default(uuid())
+  courseId        String
+  termId          String
+  academicLevelId String?
+  createdAt       DateTime           @default(now())
+
+  course          Course             @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  term            Term               @relation(fields: [termId], references: [id], onDelete: Cascade)
+  academicLevel   AcademicLevel?     @relation(fields: [academicLevelId], references: [id])
+  enrolments      StudentEnrolment[]
+
+  @@unique([courseId, termId])
+  @@map("course_offerings")
+}
+
+model StudentEnrolment {
+  id               String          @id @default(uuid())
+  userId           String
+  courseOfferingId String
+  status           EnrolmentStatus @default(SELF_DECLARED)
+  createdAt        DateTime        @default(now())
+
+  user             User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  courseOffering   CourseOffering  @relation(fields: [courseOfferingId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, courseOfferingId])
+  @@map("student_enrolments")
+}
+
+// ─── Study Together ─────────────────────────────────────────────────
+
+enum InvitationStatus {
+  PENDING
+  ACCEPTED
+  DECLINED
+  EXPIRED
+  WITHDRAWN
+}
+
+enum SessionState {
+  CREATED
+  INVITED
+  SCHEDULED
+  READY
+  ACTIVE
+  PAUSED
+  COMPLETED
+  CANCELLED
+  EXPIRED
+  ABANDONED
+  DISPUTED
+}
+
+enum PingOutcome {
+  ANSWERED
+  MISSED_CONNECTED
+  MISSED_DISCONNECTED
+  EXCUSED
+}
+
+model StudyInvitation {
+  id              String           @id @default(uuid())
+  senderId        String
+  recipientId     String
+  courseId        String
+  proposedStart   DateTime
+  durationMinutes Int              @default(60)
+  message         String?
+  status          InvitationStatus @default(PENDING)
+  idempotencyKey  String?          @unique
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  sender          User             @relation("SentInvitations", fields: [senderId], references: [id], onDelete: Cascade)
+  recipient       User             @relation("ReceivedInvitations", fields: [recipientId], references: [id], onDelete: Cascade)
+  course          Course           @relation(fields: [courseId], references: [id], onDelete: Cascade)
+
+  @@index([senderId, recipientId, status])
+  @@map("study_invitations")
+}
+
+model StudySession {
+  id                    String        @id @default(uuid())
+  hostId                String
+  courseId              String
+  status                SessionState  @default(CREATED)
+  durationMinutes       Int           @default(60)
+  cycle                 String        @default("POMODORO_50_10")
+  pingPolicy            String        @default("LIGHT")
+  responseWindowSeconds Int           @default(90)
+  goal                  String
+  startedAt             DateTime?
+  plannedEnd            DateTime?
+  actualEnd             DateTime?
+  pausedDurationSeconds Int           @default(0)
+  version               Int           @default(1) // Optimistic concurrency control
+  idempotencyKey        String?       @unique
+  createdAt             DateTime      @default(now())
+  updatedAt             DateTime      @updatedAt
+
+  host                  User          @relation("HostedSessions", fields: [hostId], references: [id], onDelete: Cascade)
+  course                Course        @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  participants          StudyParticipant[]
+  signals               AccountabilitySignal[]
+  events                SessionEvent[]
+
+  @@index([hostId, status])
+  @@map("study_sessions")
+}
+
+model StudyParticipant {
+  id               String       @id @default(uuid())
+  sessionId        String
+  userId           String
+  goal             String?
+  attended         Boolean      @default(false)
+  connectedSeconds Int          @default(0)
+  missedPings      Int          @default(0)
+  excusedPings     Int          @default(0)
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  session          StudySession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  user             User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionId, userId])
+  @@map("study_participants")
+}
+
+model AccountabilitySignal {
+  id             String       @id @default(uuid())
+  sessionId      String
+  senderId       String
+  targetUserId   String?
+  deadlineAt     DateTime
+  outcome        PingOutcome?
+  acknowledgedAt DateTime?
+  idempotencyKey String?      @unique
+  createdAt      DateTime     @default(now())
+
+  session        StudySession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  sender         User         @relation("SentSignals", fields: [senderId], references: [id], onDelete: Cascade)
+  targetUser     User?        @relation("TargetSignals", fields: [targetUserId], references: [id], onDelete: SetNull)
+
+  @@index([sessionId, deadlineAt])
+  @@map("accountability_signals")
+}
+
+model SessionEvent {
+  id        String       @id @default(uuid())
+  sessionId String
+  seq       Int
+  eventType String
+  payload   Json?
+  createdAt DateTime     @default(now())
+
+  session   StudySession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionId, seq])
+  @@map("session_events")
+}
+
+model StudyStreak {
+  id                 String    @id @default(uuid())
+  userId             String    @unique
+  currentStreak      Int       @default(0)
+  longestStreak      Int       @default(0)
+  lastSessionDate    DateTime?
+  freezesRemaining   Int       @default(1)
+  freezePeriodStart  DateTime  @default(now())
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  user               User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("study_streaks")
+}
+
+model ReliabilityRecord {
+  id                 String   @id @default(uuid())
+  userId             String   @unique
+  totalScheduled     Int      @default(0)
+  totalAttended      Int      @default(0)
+  totalStarted       Int      @default(0)
+  totalCompleted     Int      @default(0)
+  healthyMissedPings Int      @default(0)
+  rollingScore       Float    @default(100.0)
+  band               String   @default("New") // New, Building, Reliable, Very Reliable
+  updatedAt          DateTime @updatedAt
+
+  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("reliability_records")
+}
+
+// ─── Gamification (XP Ledger) ───────────────────────────────────────
+
+model XpLedger {
+  id             String   @id @default(uuid())
+  userId         String
+  amount         Int
+  reasonCode     String
+  referenceId    String?
+  idempotencyKey String?  @unique
+  createdAt      DateTime @default(now())
+
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@map("xp_ledger")
+}
+
+// ─── Trust, Safety & Moderation ─────────────────────────────────────
+
+enum ReportTargetType {
+  USER
+  MESSAGE
+  SESSION
+  POST
+  COMMENT
+}
+
+enum ReportReason {
+  HARASSMENT
+  SEXUAL_CONTENT
+  HATE_SPEECH
+  SCAM_SPAM
+  IMPERSONATION
+  ACADEMIC_MISCONDUCT
+  INAPPROPRIATE_SOLICITATION
+  OTHER
+}
+
+enum ReportStatus {
+  PENDING
+  REVIEWING
+  RESOLVED
+  DISMISSED
+}
+
+model Report {
+  id           String           @id @default(uuid())
+  reporterId   String
+  targetType   ReportTargetType
+  targetId     String
+  reason       ReportReason
+  notes        String?
+  status       ReportStatus     @default(PENDING)
+  resolvedById String?
+  resolvedAt   DateTime?
+  createdAt    DateTime         @default(now())
+
+  reporter     User             @relation("Reporter", fields: [reporterId], references: [id], onDelete: Cascade)
+
+  @@index([status, createdAt])
+  @@map("reports")
+}
+
+model ModerationAction {
+  id           String    @id @default(uuid())
+  targetUserId String
+  moderatorId  String
+  actionType   String    // WARN, REMOVE_CONTENT, RESTRICT_24H, RESTRICT_7D, SUSPEND
+  reason       String
+  notes        String?
+  expiresAt    DateTime?
+  createdAt    DateTime  @default(now())
+
+  targetUser   User      @relation("TargetUser", fields: [targetUserId], references: [id], onDelete: Cascade)
+  moderator    User      @relation("Moderator", fields: [moderatorId], references: [id], onDelete: Cascade)
+
+  @@map("moderation_actions")
+}
+
+model UserBlock {
+  id        String   @id @default(uuid())
+  blockerId String
+  blockedId String
+  createdAt DateTime @default(now())
+
+  blocker   User     @relation("Blocker", fields: [blockerId], references: [id], onDelete: Cascade)
+  blocked   User     @relation("Blocked", fields: [blockedId], references: [id], onDelete: Cascade)
+
+  @@unique([blockerId, blockedId])
+  @@map("user_blocks")
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  actorId    String
+  action     String
+  targetType String
+  targetId   String?
+  metadata   Json?
+  ipAddress  String?
+  userAgent  String?
+  createdAt  DateTime @default(now())
+
+  actor      User     @relation("Actor", fields: [actorId], references: [id], onDelete: Cascade)
+
+  @@index([actorId, createdAt])
+  @@map("audit_logs")
+}
+
+model ConsentLog {
+  id          String   @id @default(uuid())
+  userId      String
+  consentType String
+  consented   Boolean
+  ipAddress   String?
+  userAgent   String?
+  createdAt   DateTime @default(now())
+
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, consentType])
+  @@map("consent_logs")
+}
+
+// ─── Communities & Messaging ────────────────────────────────────────
+
+model Community {
+  id            String            @id @default(uuid())
+  institutionId String
+  courseId      String?
+  name          String
+  description   String?
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+
+  institution   Institution       @relation(fields: [institutionId], references: [id], onDelete: Cascade)
+  members       CommunityMember[]
+  discussions   Discussion[]
+
+  @@map("communities")
+}
+
+model CommunityMember {
+  id          String    @id @default(uuid())
+  communityId String
+  userId      String
+  role        String    @default("MEMBER") // MEMBER, MODERATOR
+  joinedAt    DateTime  @default(now())
+
+  community   Community @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([communityId, userId])
+  @@map("community_members")
+}
+
+model Discussion {
+  id               String    @id @default(uuid())
+  communityId      String
+  authorId         String
+  courseId         String?
+  title            String
+  body             String
+  isSolved         Boolean   @default(false)
+  acceptedAnswerId String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  deletedAt        DateTime?
+
+  community        Community @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  author           User      @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  comments         Comment[]
+
+  @@map("discussions")
+}
+
+model Comment {
+  id           String     @id @default(uuid())
+  discussionId String
+  authorId     String
+  parentId     String?
+  body         String
+  isAccepted   Boolean    @default(false)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+  deletedAt    DateTime?
+
+  discussion   Discussion @relation(fields: [discussionId], references: [id], onDelete: Cascade)
+  author       User       @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  parent       Comment?   @relation("CommentReplies", fields: [parentId], references: [id])
+  replies      Comment[]  @relation("CommentReplies")
+
+  @@map("comments")
+}
+
+model Conversation {
+  id        String               @id @default(uuid())
+  type      String               @default("DIRECT") // DIRECT, GROUP
+  createdAt DateTime             @default(now())
+  updatedAt DateTime             @updatedAt
+
+  members   ConversationMember[]
+  messages  Message[]
+
+  @@map("conversations")
+}
+
+model ConversationMember {
+  id             String       @id @default(uuid())
+  conversationId String
+  userId         String
+  role           String       @default("MEMBER")
+  joinedAt       DateTime     @default(now())
+  lastReadAt     DateTime?
+
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([conversationId, userId])
+  @@map("conversation_members")
+}
+
+model Message {
+  id              String       @id @default(uuid())
+  conversationId  String
+  senderId        String
+  clientMessageId String
+  body            String
+  seq             Int
+  createdAt       DateTime     @default(now())
+  deletedAt       DateTime?
+
+  conversation    Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender          User         @relation(fields: [senderId], references: [id], onDelete: Cascade)
+
+  @@unique([conversationId, seq])
+  @@unique([senderId, clientMessageId])
+  @@map("messages")
+}
