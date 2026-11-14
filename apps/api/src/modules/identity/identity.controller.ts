@@ -224,3 +224,4 @@ export class IdentityController {
     return this.identityService.disableMfa(userId, parse.data.code);
   }
 }
+

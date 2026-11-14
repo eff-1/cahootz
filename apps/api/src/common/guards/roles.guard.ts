@@ -1,33 +1,20 @@
-import { Injectable, CanActivate, ExecutionContext } from '@nestjs/common';
-import { Reflector } from '@nestjs/core';
-import { Role } from '@cahootz/shared';
-import { ROLES_KEY } from '../decorators/roles.decorator';
-import { AppError } from '../errors/app-error';
+import { ERROR_CODES, type Role } from '../../../../../packages/shared/src/index.ts';
+import { AppError } from '../errors/app-error.ts';
+import { type AuthenticatedUser } from './jwt-auth.guard.ts';
 
-@Injectable()
-export class RolesGuard implements CanActivate {
-  constructor(private readonly reflector: Reflector) {}
-
-  canActivate(context: ExecutionContext): boolean {
-    const requiredRoles = this.reflector.getAllAndOverride<Role[]>(ROLES_KEY, [
-      context.getHandler(),
-      context.getClass(),
-    ]);
-
-    if (!requiredRoles || requiredRoles.length === 0) {
-      return true;
+export class RolesGuard {
+  assertRoles(user: AuthenticatedUser | undefined, requiredRoles: readonly Role[]): void {
+    if (!user) {
+      throw AppError.unauthorized();
     }
-
-    const { user } = context.switchToHttp().getRequest();
-    if (!user || !user.roles) {
-      throw AppError.forbidden('Insufficient permissions');
+    if (requiredRoles.length === 0) {
+      return;
     }
-
-    const hasRole = requiredRoles.some((role) => user.roles.includes(role));
-    if (!hasRole) {
-      throw AppError.forbidden('You do not have the required role to access this resource');
+    if (!requiredRoles.includes(user.role)) {
+      throw AppError.forbidden(
+        ERROR_CODES.AUTH_FORBIDDEN,
+        'You do not have the required role to access this resource.'
+      );
     }
-
-    return true;
   }
 }

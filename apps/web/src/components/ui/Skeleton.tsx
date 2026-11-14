@@ -24,3 +24,4 @@ export const Skeleton: React.FC<SkeletonProps> = ({
     />
   );
 };
+

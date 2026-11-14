@@ -23,3 +23,4 @@ export function validateEnv(config: Record<string, unknown>): EnvConfig {
   }
   return result.data;
 }
+

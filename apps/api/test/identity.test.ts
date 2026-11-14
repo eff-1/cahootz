@@ -326,3 +326,4 @@ test('IdentityService - Staff TOTP MFA', async () => {
   assert.strictEqual(loginSuccess.mfaRequired, false);
   assert.ok(loginSuccess.accessToken);
 });
+

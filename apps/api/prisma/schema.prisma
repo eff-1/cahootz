@@ -681,3 +681,4 @@ model Message {
   @@unique([senderId, clientMessageId])
   @@map("messages")
 }
+

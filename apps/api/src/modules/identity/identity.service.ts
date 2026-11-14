@@ -9,6 +9,8 @@ import { AppError } from '../../common/errors/app-error.ts';
 import { PasswordService } from './password.service.ts';
 import { TokenService, type JwtPayload } from './token.service.ts';
 import { TotpService } from './totp.service.ts';
+import { DomainEventBus } from '../../common/events/domain-events.ts';
+import { uuidv7 } from '../../../../../packages/shared/src/ids/uuidv7.ts';
 
 export interface UserEntity {
   id: string;
@@ -59,14 +61,40 @@ export class IdentityService {
   private readonly verificationTokens = new Map<string, { userId: string; expiresAt: Date }>();
   private readonly resetTokens = new Map<string, { userId: string; expiresAt: Date }>();
 
+  private readonly events: DomainEventBus | null;
+
   constructor(
     passwordService?: PasswordService,
     tokenService?: TokenService,
     totpService?: TotpService,
+    events?: DomainEventBus,
   ) {
     this.passwordService = passwordService || new PasswordService();
     this.tokenService = tokenService || new TokenService();
     this.totpService = totpService || new TotpService();
+    this.events = events || null;
+  }
+
+  /**
+   * Public interface for other modules. Returns only what other modules are
+   * allowed to know about an account — never the password hash, TOTP secret or DOB.
+   */
+  getPublicInfo(userId: string): {
+    id: string;
+    email: string;
+    emailVerified: boolean;
+    isRestricted: boolean;
+    roles: string[];
+  } | null {
+    const user = this.users.get(userId);
+    if (!user || user.deletedAt) return null;
+    return {
+      id: user.id,
+      email: user.email,
+      emailVerified: user.isVerified,
+      isRestricted: this.computeAge(user.dateOfBirth) < AGE.RESTRICTED_AGE_THRESHOLD,
+      roles: [...user.roles],
+    };
   }
 
   private hashToken(token: string): string {
@@ -98,7 +126,7 @@ export class IdentityService {
 
     const passwordHash = await this.passwordService.hash(input.password);
     const isRestricted = age < AGE.RESTRICTED_AGE_THRESHOLD;
-    const userId = crypto.randomUUID();
+    const userId = uuidv7();
     const displayName = email.split('@')[0] || 'Student';
 
     const newUser: UserEntity = {
@@ -125,6 +153,7 @@ export class IdentityService {
 
     this.users.set(userId, newUser);
     this.usersByEmail.set(email, userId);
+    this.events?.publish('user.registered', { userId, isRestricted });
 
     const verificationToken = crypto.randomBytes(32).toString('hex');
     this.verificationTokens.set(verificationToken, {

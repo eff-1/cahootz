@@ -31,3 +31,4 @@ export interface EnableTotpInput {
 export interface VerifyTotpInput {
   code: string;
 }
+

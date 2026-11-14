@@ -57,3 +57,4 @@ test('Session lifecycle states match FEATURE_SPECIFICATIONS 7.2 state table', ()
     assert.ok(state in SESSION_STATES, `State ${state} should exist in SESSION_STATES`);
   }
 });
+

@@ -1,55 +1,56 @@
-import { Injectable, CanActivate, ExecutionContext } from '@nestjs/common';
-import { Reflector } from '@nestjs/core';
-import { JwtService } from '@nestjs/jwt';
-import { Request } from 'express';
-import { AppError } from '../errors/app-error';
-import { IS_PUBLIC_KEY } from '../decorators/roles.decorator';
+import { type Role } from '../../../../../packages/shared/src/index.ts';
+import { AppError } from '../errors/app-error.ts';
+import { type TokenService } from '../../modules/identity/token.service.ts';
 
-@Injectable()
-export class JwtAuthGuard implements CanActivate {
-  constructor(
-    private readonly reflector: Reflector,
-    private readonly jwtService: JwtService,
-  ) {}
+export interface AuthenticatedUser {
+  id: string;
+  email: string;
+  role: Role;
+  institutionId: string | null;
+  isMinor: boolean;
+  mfaVerified: boolean;
+}
 
-  canActivate(context: ExecutionContext): boolean {
-    const isPublic = this.reflector.getAllAndOverride<boolean>(IS_PUBLIC_KEY, [
-      context.getHandler(),
-      context.getClass(),
-    ]);
+export interface HttpAuthRequest {
+  headers: Record<string, string | string[] | undefined>;
+  cookies?: Record<string, string | undefined>;
+  user?: AuthenticatedUser;
+}
 
-    if (isPublic) {
-      return true;
-    }
+export class JwtAuthGuard {
+  private readonly tokenService: TokenService;
 
-    const request = context.switchToHttp().getRequest<Request>();
-    const token = this.extractTokenFromHeader(request);
-
-    if (!token) {
-      throw AppError.unauthenticated('Authorization token missing');
-    }
-
-    try {
-      const payload = this.jwtService.verify(token);
-      (request as any).user = payload;
-      return true;
-    } catch {
-      throw AppError.unauthenticated('Invalid or expired token');
-    }
+  constructor(tokenService: TokenService) {
+    this.tokenService = tokenService;
   }
 
-  private extractTokenFromHeader(request: Request): string | undefined {
-    // 1. Check Bearer authorization header
-    const authHeader = request.headers.authorization;
-    if (authHeader && authHeader.startsWith('Bearer ')) {
-      return authHeader.substring(7);
+  authenticateRequest(req: HttpAuthRequest): AuthenticatedUser {
+    const token = this.extractToken(req);
+    if (!token) {
+      throw AppError.unauthorized('Authorization token missing.');
     }
 
-    // 2. Fall back to access_token cookie
-    if (request.cookies && request.cookies.access_token) {
-      return request.cookies.access_token;
-    }
+    const payload = this.tokenService.verifyAccessToken(token);
+    const user: AuthenticatedUser = {
+      id: payload.sub,
+      email: payload.email,
+      role: payload.role,
+      institutionId: payload.institutionId,
+      isMinor: payload.isMinor,
+      mfaVerified: payload.mfaVerified,
+    };
+    req.user = user;
+    return user;
+  }
 
+  private extractToken(req: HttpAuthRequest): string | undefined {
+    const authHeader = req.headers['authorization'];
+    if (typeof authHeader === 'string' && authHeader.startsWith('Bearer ')) {
+      return authHeader.slice(7).trim();
+    }
+    if (req.cookies?.access_token) {
+      return req.cookies.access_token;
+    }
     return undefined;
   }
 }

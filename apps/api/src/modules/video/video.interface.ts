@@ -16,3 +16,4 @@ export interface IVideoSignalingService {
   createSessionRoom(sessionId: string): Promise<{ roomId: string }>;
   handleIceCandidate(sessionId: string, userId: string, candidate: unknown): Promise<void>;
 }
+

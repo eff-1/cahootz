@@ -6,3 +6,4 @@ import { PrismaService } from '../../prisma/prisma.service';
   exports: [],
 })
 export class MessagingModule {}
+

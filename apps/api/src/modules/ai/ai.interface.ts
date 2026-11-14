@@ -18,3 +18,4 @@ export interface ILlmProvider {
 export interface IAiStudyService {
   askCourseQuestion(courseId: string, question: string, userId: string): Promise<{ answer: string; citations: string[] }>;
 }
+
