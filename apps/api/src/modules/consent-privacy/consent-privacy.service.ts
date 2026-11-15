@@ -166,3 +166,4 @@ export class ConsentPrivacyService {
     return this.deletionRequests.get(userId) ?? null;
   }
 }
+

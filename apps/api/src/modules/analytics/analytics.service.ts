@@ -144,3 +144,4 @@ export class AnalyticsService {
     return [...this.telemetryLog];
   }
 }
+

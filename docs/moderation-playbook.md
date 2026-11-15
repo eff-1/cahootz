@@ -27,3 +27,4 @@
    - A second, independent moderator must review the evidence snapshot and the student's appeal note before marking `UPHELD` or `OVERTURNED`.
 5. **Two-Approver Rule for Sensitive Admin Actions**:
    - Actions such as `PURGE_USER`, `DISABLE_SAFETY_KILLSWITCH`, or `ELEVATE_STAFF_ROLE` require proposal by one MFA-verified staff member and approval by a second distinct MFA-verified staff member (`AdministrationService.approveSensitiveAction`).
+

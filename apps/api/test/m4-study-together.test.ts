@@ -430,3 +430,4 @@ describe('M4 — Study Together State Machine, Fairness Reconnect, Server Timer,
     assert.ok(session.participants[partnerId]!.xpAwarded > 0);
   });
 });
+

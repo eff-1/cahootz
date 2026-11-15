@@ -61,3 +61,4 @@ You can exercise the following rights directly in-app or by contacting our Data 
 | **Redis Host** | Ephemeral presence TTL keys, rate limits, queues | Session presence & rate-limit counters | Local Docker (Dev) / Managed Cloud (Prod) |
 | **Cloudflare R2 (S3-compatible)** | Object storage (disabled in MVP until virus scanning is active) | Static assets / future verified uploads | Stubbed in MVP |
 | **Transactional Email Provider** | Verification OTPs & password reset emails | Recipient email address & OTP | Mailpit (Dev) / Transactional SMTP (Prod) |
+

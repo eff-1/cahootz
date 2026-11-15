@@ -14,3 +14,4 @@
 - **One-Tap Block**: Blocking any user immediately hides your profile from them, prevents them from inviting or messaging you, and removes them from your discovery feed.
 - **One-Tap Report**: Reporting a message, post, or study session captures an immutable evidence snapshot for moderator review.
 - **Visibility Controls**: You can toggle **Discoverable** off at any time in your profile settings when you want to study solo.
+

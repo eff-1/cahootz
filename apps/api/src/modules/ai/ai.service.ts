@@ -9,3 +9,4 @@ export class AiAssistantService {
     throw AppError.forbidden('AI Study Assistant is out of MVP scope (scheduled for Release R3).');
   }
 }
+

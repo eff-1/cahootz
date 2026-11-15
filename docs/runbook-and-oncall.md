@@ -32,3 +32,4 @@ If a subsystem experiences abuse or instability during the pilot, MFA-verified a
    - Query the append-only `AuditLog` (`ModerationService.listAuditLog`) and request correlation logs (`X-Request-Id`) to determine scope.
 3. **Notify**:
    - Escalate immediately to the Founder (Faruq) and appointed Nigerian Data Protection Counsel to assess NDPA 2023 / NDPC notification obligations (72-hour regulator window where applicable).
+

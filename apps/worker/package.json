@@ -1,0 +1,14 @@
+{
+  "name": "@cahootz/worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --experimental-strip-types --test test/worker.test.ts"
+  },
+  "dependencies": {
+    "@cahootz/shared": "workspace:*",
+    "bullmq": "^5.34.0",
+    "ioredis": "^5.4.1"
+  }
+}

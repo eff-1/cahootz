@@ -285,3 +285,4 @@ export const StudyTogetherRoom: React.FC<StudyTogetherRoomProps> = ({
     </main>
   );
 };
+

@@ -27,3 +27,4 @@ You agree **not** to:
 
 ## 5. Enforcement & Appeals
 Violations may result in content removal, temporary restrictions (24 hours or 7 days), or account suspension. Every moderation sanction may be appealed once; appeals are reviewed by a different moderator than the one who issued the original sanction.
+

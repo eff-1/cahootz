@@ -9,3 +9,4 @@ export class VideoRoomService {
     throw AppError.forbidden('Voice and video study rooms are out of MVP scope (scheduled for Release R3).');
   }
 }
+
