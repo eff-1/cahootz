@@ -179,10 +179,19 @@ export class MessagingService {
     return message;
   }
 
-  listMessages(actorUserId: string, otherUserId: string): DirectMessageEntity[] {
-    const convKey = MessagingService.getConversationKey(actorUserId, otherUserId);
-    const list = this.messagesByConversation.get(convKey) ?? [];
-    return list.filter((m) => !m.isRemovedByModeration);
+  listMessages(actorUserId: string, otherUserId?: string): DirectMessageEntity[] {
+    if (otherUserId) {
+      const convKey = MessagingService.getConversationKey(actorUserId, otherUserId);
+      const list = this.messagesByConversation.get(convKey) ?? [];
+      return list.filter((m) => !m.isRemovedByModeration);
+    }
+    return Array.from(this.messagesById.values())
+      .filter(
+        (m) =>
+          !m.isRemovedByModeration &&
+          (m.senderId === actorUserId || m.recipientId === actorUserId)
+      )
+      .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
   }
 
   /**

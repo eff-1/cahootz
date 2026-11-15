@@ -34,6 +34,7 @@ import { AdministrationService } from './modules/administration/administration.s
 import { ConsentPrivacyService } from './modules/consent-privacy/consent-privacy.service.ts';
 import { AnalyticsService } from './modules/analytics/analytics.service.ts';
 import { seedPilotInstitution, type PilotSeedResult } from './seed/pilot-seed.ts';
+import { renderAccessibleWebPage, renderClientAppJs } from './web-ui.ts';
 
 export interface HttpDispatchRequest {
   method?: string;
@@ -132,309 +133,6 @@ function parseCookies(cookieHeader: string | undefined): Record<string, string> 
 
 function formatRefreshCookie(token: string, maxAgeSeconds = 7 * 24 * 60 * 60): string {
   return `refresh_token=${token}; HttpOnly; Secure; SameSite=Strict; Path=${API_BASE_PATH}/auth; Max-Age=${maxAgeSeconds}`;
-}
-
-function renderAccessibleWebPage(pathname: string): string | null {
-  const pages: Record<string, { title: string; heading: string; content: string }> = {
-    '/': {
-      title: `${BRAND_NAME} — ${BRAND_TAGLINE}`,
-      heading: `${BRAND_NAME} Student Study Dashboard`,
-      content: `
-        <p class="subtitle">${BRAND_PROPOSITION}</p>
-        <section aria-labelledby="stats-heading" class="grid">
-          <h2 id="stats-heading" class="sr-only">Study Commitment Metrics</h2>
-          <div class="card">
-            <span class="label">Current Streak</span>
-            <strong class="metric">4 Days</strong>
-            <span class="hint">1 freeze available per 14 days (Africa/Lagos)</span>
-          </div>
-          <div class="card">
-            <span class="label">Reliability Band</span>
-            <strong class="metric">${RELIABILITY_BANDS.VERY_RELIABLE}</strong>
-            <span class="hint">Technical disconnects never penalize your score</span>
-          </div>
-          <div class="card">
-            <span class="label">Total XP (Append-Only Ledger)</span>
-            <strong class="metric">350 XP</strong>
-            <span class="hint">Non-monetary academic commitment record</span>
-          </div>
-        </section>
-        <div class="actions">
-          <a href="/discover" class="btn-primary">Find a Study Partner</a>
-          <a href="/sessions/demo" class="btn-secondary">Enter Study Together Room</a>
-        </div>
-      `,
-    },
-    '/onboarding': {
-      title: `Academic Onboarding — ${BRAND_NAME}`,
-      heading: 'Complete Your Academic Profile',
-      content: `
-        <p class="subtitle">Self-declared academic profile gives immediate access to Study Together. Optional institutional email OTP adds a verified badge.</p>
-        <form aria-label="Academic Onboarding Form" class="card form-stack" action="/discover" method="get">
-          <div class="field">
-            <label for="institution-select">University / Institution</label>
-            <select id="institution-select" name="institution">
-              <option value="${PILOT_INSTITUTION.code}">${PILOT_INSTITUTION.name}</option>
-            </select>
-          </div>
-          <div class="field">
-            <label for="display-name">Display Name</label>
-            <input id="display-name" name="displayName" type="text" required value="Tunde Bakare" />
-          </div>
-          <div class="field">
-            <label for="inst-email">Institutional Email (Optional 6-Digit OTP)</label>
-            <input id="inst-email" name="institutionalEmail" type="email" placeholder="tunde@student.sample-university.example" />
-          </div>
-          <button type="submit" class="btn-primary">Save Profile &amp; Continue</button>
-        </form>
-      `,
-    },
-    '/discover': {
-      title: `Discover Study Partners — ${BRAND_NAME}`,
-      heading: 'Discover Study Partners in Your Institution',
-      content: `
-        <p class="subtitle">Matched transparently by shared courses, academic level, availability, and Study Now signal.</p>
-        <section aria-labelledby="matches-heading" class="stack">
-          <h2 id="matches-heading">Top Course Matches (CSC 301 &amp; CSC 305)</h2>
-          <article class="card partner-row">
-            <div>
-              <h3>Zainab M. <span class="badge">Very Reliable</span> <span class="badge-now">Looking to Study Now</span></h3>
-              <p>2 shared courses (CSC 301, CSC 305) · 300 Level · Goal: Past Questions</p>
-            </div>
-            <a href="/sessions/demo" class="btn-primary">Invite to Study</a>
-          </article>
-        </section>
-      `,
-    },
-    '/sessions/demo': {
-      title: `Study Together Focus Room — ${BRAND_NAME}`,
-      heading: 'CSC 301 — Operating Systems Focus Session',
-      content: `
-        <p class="subtitle">Partner: Zainab M. (Present &amp; Focused) · No camera or screen surveillance.</p>
-        <section aria-labelledby="timer-heading" class="card timer-box">
-          <h2 id="timer-heading">Server-Synchronized Focus Timer</h2>
-          <div role="timer" aria-label="Remaining focus time 25 minutes 00 seconds" class="timer-digits">25:00</div>
-          <p class="hint">5-minute reconnect grace active — power cuts or mobile data drops are never penalized.</p>
-          <div class="actions">
-            <button type="button" class="btn-primary">Confirm Check-In / Ping</button>
-            <button type="button" class="btn-secondary">Pause Timer</button>
-            <button type="button" class="btn-outline">Consented Emergency Exit</button>
-          </div>
-        </section>
-      `,
-    },
-    '/communities': {
-      title: `Course Communities — ${BRAND_NAME}`,
-      heading: 'Course Communities &amp; Q&amp;A',
-      content: `
-        <p class="subtitle">Auto-joined from your enrolled courses. Every post requires a course tag.</p>
-        <article class="card">
-          <h2><span class="badge">CSC 301</span> How does Peterson's solution guarantee mutual exclusion?</h2>
-          <p>Accepted Answer: The flag array expresses intent to enter the critical section while turn breaks ties deterministically.</p>
-        </article>
-      `,
-    },
-    '/messages': {
-      title: `Study Partner Messages — ${BRAND_NAME}`,
-      heading: '1:1 Academic Direct Messages',
-      content: `
-        <p class="subtitle">Available only between confirmed study partners or shared-course adults. File uploads are disabled in MVP.</p>
-        <section aria-labelledby="chat-heading" class="card form-stack">
-          <h2 id="chat-heading">Conversation with Zainab M.</h2>
-          <p><strong>Zainab M.:</strong> Ready for our CSC 301 past-question review?</p>
-          <div class="field">
-            <label for="chat-message-input">Your Message</label>
-            <input id="chat-message-input" type="text" placeholder="Write a message..." />
-          </div>
-          <div class="actions">
-            <button type="button" class="btn-primary">Send Message</button>
-            <button type="button" class="btn-outline">One-Tap Report</button>
-          </div>
-        </section>
-      `,
-    },
-    '/settings/privacy': {
-      title: `Privacy & Data Rights (NDPA 2023) — ${BRAND_NAME}`,
-      heading: 'Privacy, Security &amp; NDPA 2023 Data Rights',
-      content: `
-        <p class="subtitle">Manage profile discoverability, active device sessions, JSON data portability export, and 30-day account deletion.</p>
-        <section aria-labelledby="rights-heading" class="card stack">
-          <h2 id="rights-heading">Self-Service Controls</h2>
-          <div class="actions">
-            <button type="button" class="btn-primary">Export My Data (JSON)</button>
-            <button type="button" class="btn-secondary">Sign Out Everywhere</button>
-            <button type="button" class="btn-outline">Request Account Deletion (30d Grace)</button>
-          </div>
-        </section>
-      `,
-    },
-  };
-
-  const page = pages[pathname];
-  if (!page) return null;
-
-  return `<!DOCTYPE html>
-<html lang="en-NG">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>${page.title}</title>
-  <style>
-    :root {
-      --navy: #0B1B3A;
-      --blue: #1D4ED8;
-      --bg: #F7F6F2;
-      --surface: #FFFFFF;
-      --text: #0B1B3A;
-      --muted: #334155;
-      --green: #065F46;
-      --green-bg: #D1FAE5;
-    }
-    * { box-sizing: border-box; }
-    body {
-      margin: 0;
-      font-family: system-ui, -apple-system, sans-serif;
-      background: var(--bg);
-      color: var(--text);
-      line-height: 1.5;
-    }
-    .skip-link {
-      position: absolute;
-      left: -9999px;
-      top: 8px;
-      background: var(--navy);
-      color: #FFFFFF;
-      padding: 12px 16px;
-      border-radius: 8px;
-      font-weight: 700;
-      text-decoration: none;
-    }
-    .skip-link:focus { left: 8px; z-index: 1000; }
-    .sr-only {
-      position: absolute;
-      width: 1px;
-      height: 1px;
-      padding: 0;
-      margin: -1px;
-      overflow: hidden;
-      clip: rect(0, 0, 0, 0);
-      white-space: nowrap;
-      border: 0;
-    }
-    nav {
-      background: var(--navy);
-      color: #FFFFFF;
-      padding: 12px 16px;
-      display: flex;
-      flex-wrap: wrap;
-      gap: 12px;
-      align-items: center;
-      justify-content: space-between;
-    }
-    nav a {
-      color: #FFFFFF;
-      text-decoration: none;
-      font-weight: 600;
-      min-height: 44px;
-      display: inline-flex;
-      align-items: center;
-      padding: 0 8px;
-    }
-    nav a:hover, nav a:focus { text-decoration: underline; }
-    main {
-      max-width: 900px;
-      margin: 0 auto;
-      padding: 20px 16px 48px;
-    }
-    h1 { font-size: 1.6rem; margin-top: 0; }
-    h2 { font-size: 1.25rem; }
-    .subtitle { color: var(--muted); margin-bottom: 20px; }
-    .grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-      gap: 16px;
-      margin-bottom: 24px;
-    }
-    .stack { display: flex; flex-direction: column; gap: 16px; }
-    .card {
-      background: var(--surface);
-      border: 1px solid #CBD5E1;
-      border-radius: 12px;
-      padding: 20px;
-    }
-    .label { display: block; font-size: 0.85rem; color: var(--muted); font-weight: 600; }
-    .metric { display: block; font-size: 1.75rem; margin: 4px 0; color: var(--navy); }
-    .hint { display: block; font-size: 0.82rem; color: var(--muted); }
-    .actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 16px; }
-    .btn-primary, .btn-secondary, .btn-outline {
-      min-height: 44px;
-      min-width: 44px;
-      padding: 10px 18px;
-      border-radius: 8px;
-      font-weight: 700;
-      font-size: 0.95rem;
-      cursor: pointer;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      text-decoration: none;
-    }
-    .btn-primary { background: var(--blue); color: #FFFFFF; border: 2px solid var(--blue); }
-    .btn-secondary { background: var(--navy); color: #FFFFFF; border: 2px solid var(--navy); }
-    .btn-outline { background: #FFFFFF; color: var(--navy); border: 2px solid var(--navy); }
-    .form-stack { display: flex; flex-direction: column; gap: 16px; }
-    .field { display: flex; flex-direction: column; gap: 6px; }
-    label { font-weight: 700; font-size: 0.95rem; }
-    input, select {
-      min-height: 44px;
-      padding: 8px 12px;
-      border: 1px solid #64748B;
-      border-radius: 8px;
-      font-size: 1rem;
-      color: var(--text);
-      background: #FFFFFF;
-    }
-    .badge {
-      background: var(--green-bg);
-      color: var(--green);
-      font-size: 0.8rem;
-      padding: 2px 8px;
-      border-radius: 999px;
-    }
-    .badge-now {
-      background: #DBEAFE;
-      color: #1E3A8A;
-      font-size: 0.8rem;
-      padding: 2px 8px;
-      border-radius: 999px;
-    }
-    .timer-digits {
-      font-size: 3.5rem;
-      font-weight: 800;
-      font-variant-numeric: tabular-nums;
-      margin: 12px 0;
-    }
-  </style>
-</head>
-<body>
-  <a href="#main-content" class="skip-link">Skip to main content</a>
-  <nav aria-label="Primary Navigation">
-    <a href="/">${BRAND_NAME}</a>
-    <div>
-      <a href="/onboarding">Onboarding</a>
-      <a href="/discover">Discover</a>
-      <a href="/sessions/demo">Study Room</a>
-      <a href="/communities">Communities</a>
-      <a href="/messages">Messages</a>
-      <a href="/settings/privacy">Privacy</a>
-    </div>
-  </nav>
-  <main id="main-content">
-    <h1>${page.heading}</h1>
-    ${page.content}
-  </main>
-</body>
-</html>`;
 }
 
 export function createCahootzHttpServer(
@@ -722,6 +420,13 @@ export function createCahootzHttpServer(
   // Auth rate limit counters
   const loginAttemptsByEmail = new Map<string, number[]>();
   const registerAttemptsByIp = new Map<string, number[]>();
+  // Virtual clock offset per session (used only in non-production E2E browser tests)
+  const sessionClockOffsetsMs = new Map<string, number>();
+
+  function sessionNow(sessionId: string): Date {
+    const offset = sessionClockOffsetsMs.get(sessionId) ?? 0;
+    return new Date(Date.now() + offset);
+  }
 
   function checkRateLimit(
     bucketMap: Map<string, number[]>,
@@ -806,7 +511,16 @@ export function createCahootzHttpServer(
         (typeof body.idempotencyKey === 'string' ? body.idempotencyKey.trim() : undefined);
       const clientIp = req.ip ?? normHeaders['x-forwarded-for'] ?? '127.0.0.1';
 
-      // ─── Accessible Web App Routes (`GET /`, `/onboarding`, `/discover`, etc.) ───
+      // ─── Client JS & Accessible Web App Routes (`GET /app.js`, `GET /`, `/onboarding`, etc.) ───
+      if (method === 'GET' && pathname === '/app.js') {
+        return {
+          status: 200,
+          headers: responseHeaders,
+          body: renderClientAppJs() as unknown as T,
+          contentType: 'application/javascript; charset=utf-8',
+        };
+      }
+
       if (method === 'GET' && !pathname.startsWith('/api/') && pathname !== '/healthz' && pathname !== '/readyz') {
         const html = renderAccessibleWebPage(pathname);
         if (html) {
@@ -969,7 +683,7 @@ export function createCahootzHttpServer(
 
       if (method === 'GET' && pathname === `${API_BASE_PATH}/students/me`) {
         const user = requireAuth(normHeaders);
-        const profile = studentsService.getOwnProfile(user.id);
+        const profile = studentsService.findProfile(user.id);
         const courseIds = studentsService.getEnrolledCourseIds(user.id);
         const xp = walletService.getXpBalance(user.id);
         const streak = walletService.getStreak(user.id);
@@ -979,6 +693,17 @@ export function createCahootzHttpServer(
           headers: responseHeaders,
           body: { data: { profile, courseIds, xp, streak, reliability } } as T,
         };
+      }
+
+      if (method === 'POST' && pathname === `${API_BASE_PATH}/students/block`) {
+        const user = requireAuth(normHeaders);
+        const block = await studentsService.blockUser(
+          user.id,
+          String(body.blockedId ?? ''),
+          body.reason ? String(body.reason) : undefined
+        );
+        syncToSql();
+        return { status: 200, headers: responseHeaders, body: { data: block } as T };
       }
 
       // ─── Discovery & Invitations (`/api/v1/discovery/*`) ─────────
@@ -1003,6 +728,12 @@ export function createCahootzHttpServer(
         return { status: 200, headers: responseHeaders, body: { data: signal } as T };
       }
 
+      if (method === 'GET' && pathname === `${API_BASE_PATH}/discovery/invitations`) {
+        const user = requireAuth(normHeaders);
+        const items = discoveryService.listInvitationsForUser(user.id, 'all');
+        return { status: 200, headers: responseHeaders, body: { data: { items } } as T };
+      }
+
       if (method === 'POST' && pathname === `${API_BASE_PATH}/discovery/invitations`) {
         const user = requireAuth(normHeaders);
         const invitation = await discoveryService.sendInvitation(user.id, {
@@ -1021,12 +752,22 @@ export function createCahootzHttpServer(
       );
       if (method === 'POST' && invRespondMatch) {
         const user = requireAuth(normHeaders);
-        const decision = body.accept === false || body.decision === 'DECLINE' ? 'DECLINE' : 'ACCEPT';
-        const inv = await discoveryService.respondToInvitation(
-          user.id,
-          invRespondMatch[1]!,
-          decision
-        );
+        const invId = invRespondMatch[1]!;
+        const isDecline = body.accept === false || body.decision === 'DECLINE';
+        const inv = isDecline
+          ? await discoveryService.declineInvitation(user.id, invId)
+          : await discoveryService.acceptInvitation(user.id, invId);
+
+        if (!isDecline && !inv.sessionId) {
+          const session = await studySessionsService.createSession(inv.senderId, {
+            partnerId: inv.recipientId,
+            courseId: inv.courseId,
+            goal: inv.goal,
+            plannedDurationMinutes: inv.durationMinutes,
+            idempotencyKey: `inv-session-${inv.id}`,
+          });
+          discoveryService.attachSessionToInvitation(inv.id, session.id);
+        }
         syncToSql();
         return { status: 200, headers: responseHeaders, body: { data: inv } as T };
       }
@@ -1047,11 +788,253 @@ export function createCahootzHttpServer(
           partnerId: String(body.partnerId ?? ''),
           courseId: String(body.courseId ?? ''),
           goal: String(body.goal ?? ''),
-          plannedDurationMinutes: body.plannedDurationMinutes,
+          plannedDurationMinutes: body.plannedDurationMinutes ?? body.durationMinutes,
           idempotencyKey,
         });
         syncToSql();
         return { status: 201, headers: responseHeaders, body: { data: session } as T };
+      }
+
+      const sessionStateMatch = pathname.match(
+        new RegExp(`^${API_BASE_PATH}/sessions/([^/]+)/state$`)
+      );
+      if (method === 'GET' && sessionStateMatch) {
+        const user = requireAuth(normHeaders);
+        const sessionId = sessionStateMatch[1]!;
+        const now = sessionNow(sessionId);
+        const session = studySessionsService.getSessionForParticipant(user.id, sessionId);
+        const timerSnapshot = studySessionsService.getTimerSnapshot(user.id, sessionId, now);
+        const pings = studySessionsService.getPingsForParticipant(user.id, sessionId);
+        const dispute = studySessionsService.getDisputeForSession(user.id, sessionId);
+        const xp = walletService.getXpBalance(user.id);
+        const streak = walletService.getStreak(user.id);
+        const reliability = walletService.getReliability(user.id);
+
+        return {
+          status: 200,
+          headers: responseHeaders,
+          body: {
+            data: {
+              session,
+              timerSnapshot,
+              pings,
+              dispute,
+              studentStats: {
+                xp,
+                streakDays: streak.currentStreakDays,
+                reliabilityBand: reliability.band,
+                reliabilityScore: reliability.score,
+              },
+            },
+          } as T,
+        };
+      }
+
+      const sessionCheckInMatch = pathname.match(
+        new RegExp(`^${API_BASE_PATH}/sessions/([^/]+)/check-in$`)
+      );
+      if (method === 'POST' && sessionCheckInMatch) {
+        const user = requireAuth(normHeaders);
+        const sessionId = sessionCheckInMatch[1]!;
+        const now = sessionNow(sessionId);
+        const session = await studySessionsService.checkIn(
+          user.id,
+          sessionId,
+          {
+            clientEventId: body.clientEventId,
+            expectedVersion: body.expectedVersion,
+          },
+          now
+        );
+        syncToSql();
+        return { status: 200, headers: responseHeaders, body: { data: session } as T };
+      }
+
+      const sessionHbMatch = pathname.match(
+        new RegExp(`^${API_BASE_PATH}/sessions/([^/]+)/heartbeat$`)
+      );
+      if (method === 'POST' && sessionHbMatch) {
+        const user = requireAuth(normHeaders);
+        const sessionId = sessionHbMatch[1]!;
+        const now = sessionNow(sessionId);
+        const session = studySessionsService.recordHeartbeat(
+          user.id,
+          sessionId,
+          {
+            visibility: body.visibility === 'HIDDEN' ? 'HIDDEN' : 'VISIBLE',
+            clientEventId: body.clientEventId,
+            clientSeq: typeof body.clientSeq === 'number' ? body.clientSeq : undefined,
+            clientTimestamp: body.clientTimestamp ? new Date(body.clientTimestamp) : undefined,
+          },
+          now
+        );
+        syncToSql();
+        return { status: 200, headers: responseHeaders, body: { data: session } as T };
+      }
+
+      const sessionPingMatch = pathname.match(
+        new RegExp(`^${API_BASE_PATH}/sessions/([^/]+)/ping$`)
+      );
+      if (method === 'POST' && sessionPingMatch) {
+        const user = requireAuth(normHeaders);
+        const sessionId = sessionPingMatch[1]!;
+        const now = sessionNow(sessionId);
+        const ping = studySessionsService.sendAccountabilityPing(
+          user.id,
+          sessionId,
+          {
+            idempotencyKey,
+            clientEventId: body.clientEventId,
+          },
+          now
+        );
+        syncToSql();
+        return { status: 201, headers: responseHeaders, body: { data: ping } as T };
+      }
+
+      const sessionPingRespondMatch = pathname.match(
+        new RegExp(`^${API_BASE_PATH}/sessions/([^/]+)/ping/([^/]+)/respond$`)
+      );
+      if (method === 'POST' && sessionPingRespondMatch) {
+        const user = requireAuth(normHeaders);
+        const sessionId = sessionPingRespondMatch[1]!;
+        const pingId = sessionPingRespondMatch[2]!;
+        const now = sessionNow(sessionId);
+        const ping = studySessionsService.respondToPing(user.id, sessionId, pingId, now);
+        syncToSql();
+        return { status: 200, headers: responseHeaders, body: { data: ping } as T };
+      }
+
+      const sessionPauseMatch = pathname.match(
+        new RegExp(`^${API_BASE_PATH}/sessions/([^/]+)/pause$`)
+      );
+      if (method === 'POST' && sessionPauseMatch) {
+        const user = requireAuth(normHeaders);
+        const sessionId = sessionPauseMatch[1]!;
+        const now = sessionNow(sessionId);
+        const session = studySessionsService.pauseSession(
+          user.id,
+          sessionId,
+          { reason: body.reason },
+          now
+        );
+        syncToSql();
+        return { status: 200, headers: responseHeaders, body: { data: session } as T };
+      }
+
+      const sessionResumeMatch = pathname.match(
+        new RegExp(`^${API_BASE_PATH}/sessions/([^/]+)/resume$`)
+      );
+      if (method === 'POST' && sessionResumeMatch) {
+        const user = requireAuth(normHeaders);
+        const sessionId = sessionResumeMatch[1]!;
+        const now = sessionNow(sessionId);
+        const session = studySessionsService.resumeSession(user.id, sessionId, {}, now);
+        syncToSql();
+        return { status: 200, headers: responseHeaders, body: { data: session } as T };
+      }
+
+      const sessionDisconnectMatch = pathname.match(
+        new RegExp(`^${API_BASE_PATH}/sessions/([^/]+)/disconnect$`)
+      );
+      if (method === 'POST' && sessionDisconnectMatch) {
+        const user = requireAuth(normHeaders);
+        const sessionId = sessionDisconnectMatch[1]!;
+        const now = sessionNow(sessionId);
+        const session = studySessionsService.reportNetworkDisconnect(user.id, sessionId, now);
+        syncToSql();
+        return { status: 200, headers: responseHeaders, body: { data: session } as T };
+      }
+
+      const sessionReconnectMatch = pathname.match(
+        new RegExp(`^${API_BASE_PATH}/sessions/([^/]+)/reconnect$`)
+      );
+      if (method === 'POST' && sessionReconnectMatch) {
+        const user = requireAuth(normHeaders);
+        const sessionId = sessionReconnectMatch[1]!;
+        const now = sessionNow(sessionId);
+        const result = studySessionsService.reconnectWithResumeToken(
+          user.id,
+          sessionId,
+          String(body.resumeToken ?? ''),
+          now
+        );
+        syncToSql();
+        return { status: 200, headers: responseHeaders, body: { data: result } as T };
+      }
+
+      const sessionCompleteMatch = pathname.match(
+        new RegExp(`^${API_BASE_PATH}/sessions/([^/]+)/complete$`)
+      );
+      if (method === 'POST' && sessionCompleteMatch) {
+        const user = requireAuth(normHeaders);
+        const sessionId = sessionCompleteMatch[1]!;
+        const now = sessionNow(sessionId);
+        const session = await studySessionsService.completeSession(
+          user.id,
+          sessionId,
+          { emergencyExitReason: body.emergencyExitReason },
+          now
+        );
+        syncToSql();
+        return { status: 200, headers: responseHeaders, body: { data: session } as T };
+      }
+
+      const sessionDisputeMatch = pathname.match(
+        new RegExp(`^${API_BASE_PATH}/sessions/([^/]+)/dispute$`)
+      );
+      if (method === 'POST' && sessionDisputeMatch) {
+        const user = requireAuth(normHeaders);
+        const sessionId = sessionDisputeMatch[1]!;
+        const now = sessionNow(sessionId);
+        const dispute = await studySessionsService.fileDispute(
+          user.id,
+          sessionId,
+          String(body.reason ?? 'Disputed outcome'),
+          now
+        );
+        syncToSql();
+        return { status: 201, headers: responseHeaders, body: { data: dispute } as T };
+      }
+
+      const sessionSimClockMatch = pathname.match(
+        new RegExp(`^${API_BASE_PATH}/sessions/([^/]+)/simulate-clock$`)
+      );
+      if (method === 'POST' && sessionSimClockMatch && process.env.NODE_ENV !== 'production') {
+        const user = requireAuth(normHeaders);
+        const sessionId = sessionSimClockMatch[1]!;
+        const advanceSeconds = Math.max(0, Number(body.advanceSeconds ?? 0));
+        const session = studySessionsService.getSessionForParticipant(user.id, sessionId);
+        let remainingSec = advanceSeconds;
+        while (remainingSec > 0) {
+          const stepSec = Math.min(30, remainingSec);
+          const currentOffset = sessionClockOffsetsMs.get(sessionId) ?? 0;
+          sessionClockOffsetsMs.set(sessionId, currentOffset + stepSec * 1000);
+          remainingSec -= stepSec;
+          const tickNow = sessionNow(sessionId);
+          for (const part of Object.values(session.participants)) {
+            if (part.presenceState === 'PRESENT') {
+              studySessionsService.recordHeartbeat(
+                part.userId,
+                sessionId,
+                { visibility: 'VISIBLE' },
+                tickNow
+              );
+            }
+          }
+        }
+        syncToSql();
+        return {
+          status: 200,
+          headers: responseHeaders,
+          body: {
+            data: {
+              sessionId,
+              offsetMs: sessionClockOffsetsMs.get(sessionId) ?? 0,
+              simulatedNow: sessionNow(sessionId).toISOString(),
+            },
+          } as T,
+        };
       }
 
       const sessionGetMatch = pathname.match(
@@ -1066,27 +1049,20 @@ export function createCahootzHttpServer(
         return { status: 200, headers: responseHeaders, body: { data: session } as T };
       }
 
-      const sessionCheckInMatch = pathname.match(
-        new RegExp(`^${API_BASE_PATH}/sessions/([^/]+)/check-in$`)
-      );
-      if (method === 'POST' && sessionCheckInMatch) {
+      // ─── Direct Messages (`/api/v1/messages/*`) ──────────────────
+      if (method === 'GET' && pathname === `${API_BASE_PATH}/messages`) {
         const user = requireAuth(normHeaders);
-        const sessionId = sessionCheckInMatch[1]!;
-        const session = await studySessionsService.checkIn(user.id, sessionId, {
-          clientEventId: body.clientEventId,
-          expectedVersion: body.expectedVersion,
-        });
-        syncToSql();
-        return { status: 200, headers: responseHeaders, body: { data: session } as T };
+        const otherUserId = parsedUrl.searchParams.get('partnerId') ?? undefined;
+        const items = messagingService.listMessages(user.id, otherUserId);
+        return { status: 200, headers: responseHeaders, body: { data: { items } } as T };
       }
 
-      // ─── Direct Messages (`/api/v1/messages/*`) ──────────────────
       if (method === 'POST' && pathname === `${API_BASE_PATH}/messages`) {
         const user = requireAuth(normHeaders);
         const msg = await messagingService.sendMessage(user.id, {
           recipientId: String(body.recipientId ?? ''),
           body: String(body.body ?? ''),
-          clientMessageId: String(body.clientMessageId ?? uuidv7()),
+          clientMessageId: String(body.clientMessageId ?? idempotencyKey ?? uuidv7()),
         });
         syncToSql();
         return { status: 201, headers: responseHeaders, body: { data: msg } as T };
@@ -1099,11 +1075,33 @@ export function createCahootzHttpServer(
         return { status: 200, headers: responseHeaders, body: { data: msg } as T };
       }
 
+      // ─── Moderation Reports (`/api/v1/moderation/reports`) ───────
+      if (method === 'POST' && pathname === `${API_BASE_PATH}/moderation/reports`) {
+        const user = requireAuth(normHeaders);
+        const report = await moderationService.createReport(user, {
+          targetUserId: String(body.targetUserId ?? ''),
+          targetType: (body.targetType as any) ?? 'USER',
+          targetId: String(body.targetId ?? body.targetUserId ?? ''),
+          category: (body.category as any) ?? 'SPAM',
+          description: String(body.description ?? 'Student report'),
+          evidenceSnapshot: body.evidenceSnapshot ?? { reportedVia: 'student-ui' },
+        });
+        syncToSql();
+        return { status: 201, headers: responseHeaders, body: { data: report } as T };
+      }
+
       // ─── Privacy & Data Rights (`/api/v1/privacy/*`) ─────────────
       if (method === 'GET' && pathname === `${API_BASE_PATH}/privacy/export`) {
         const user = requireAuth(normHeaders);
         const exported = consentPrivacyService.exportUserData(user.id);
         return { status: 200, headers: responseHeaders, body: { data: exported } as T };
+      }
+
+      if (method === 'POST' && pathname === `${API_BASE_PATH}/privacy/delete-account`) {
+        const user = requireAuth(normHeaders);
+        const deletion = await consentPrivacyService.requestAccountDeletion(user.id);
+        syncToSql();
+        return { status: 200, headers: responseHeaders, body: { data: deletion } as T };
       }
 
       const exportUserMatch = pathname.match(
@@ -1187,6 +1185,7 @@ export function createCahootzHttpServer(
     syncToSql();
     sqlStore.close();
     if (server.listening) {
+      server.closeAllConnections();
       await new Promise<void>((resolve, reject) => {
         server.close((err) => (err ? reject(err) : resolve()));
       });

@@ -2,22 +2,23 @@
   "name": "cahootz",
   "type": "module",
   "private": true,
-  "packageManager": "pnpm@9.15.0",
   "workspaces": [
     "apps/*",
     "packages/*"
   ],
   "engines": {
-    "node": ">=20.0.0"
+    "node": "24.18.1"
   },
   "scripts": {
-    "build": "npm run build --workspaces --if-present",
-    "dev": "npm run dev --workspaces --if-present",
-    "lint": "npm run lint --workspaces --if-present",
-    "typecheck": "npm run typecheck --workspaces --if-present",
-    "test": "node --experimental-strip-types --test packages/shared/test/constants.test.ts packages/shared/test/uuidv7.test.ts apps/api/test/identity.test.ts apps/api/test/middleware.test.ts apps/api/test/m2-onboarding.test.ts apps/api/test/m3-discovery.test.ts apps/api/test/m4-study-together.test.ts apps/api/test/m5-safety-ops.test.ts apps/api/test/m6-security-threats.test.ts apps/api/test/m7-analytics-pilot.test.ts apps/api/test/http-server.e2e.test.ts apps/api/test/verification-audit.test.ts apps/worker/test/worker.test.ts",
-    "docker:up": "docker compose -f infra/docker-compose.yml up -d",
-    "docker:down": "docker compose -f infra/docker-compose.yml down",
-    "bootstrap": "npm install && npm run build --workspace=@cahootz/shared"
+    "start": "node --experimental-strip-types apps/api/src/main.ts",
+    "dev": "node --experimental-strip-types --watch apps/api/src/main.ts",
+    "test": "node --experimental-strip-types --test packages/shared/test/constants.test.ts packages/shared/test/uuidv7.test.ts apps/api/test/identity.test.ts apps/api/test/middleware.test.ts apps/api/test/m2-onboarding.test.ts apps/api/test/m3-discovery.test.ts apps/api/test/m4-study-together.test.ts apps/api/test/m5-safety-ops.test.ts apps/api/test/m6-security-threats.test.ts apps/api/test/m7-analytics-pilot.test.ts apps/api/test/http-server.e2e.test.ts apps/api/test/verification-audit.test.ts apps/api/test/email-provider.test.ts apps/worker/test/worker.test.ts",
+    "test:browser": "npx playwright test",
+    "smoke:security": "node --experimental-strip-types apps/api/test/audit-scans-and-load.ts"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "^4.10.1",
+    "@playwright/test": "^1.51.0",
+    "playwright": "^1.51.0"
   }
 }

@@ -3,13 +3,13 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": "24.18.1"
+  },
   "scripts": {
     "test": "node --experimental-strip-types --test test/worker.test.ts"
   },
   "dependencies": {
-    "@cahootz/shared": "workspace:*",
-    "bullmq": "^5.34.0",
-    "ioredis": "^5.4.1"
+    "@cahootz/shared": "*"
   }
 }
-

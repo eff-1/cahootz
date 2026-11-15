@@ -1386,6 +1386,22 @@ export class StudySessionsService {
     return [...(this.eventsBySession.get(sessionId) ?? [])];
   }
 
+  getPingsForParticipant(userId: string, sessionId: string): AccountabilityPingEntity[] {
+    this.getSessionForParticipant(userId, sessionId);
+    return [...(this.pingsBySession.get(sessionId) ?? [])];
+  }
+
+  getDisputeForSession(userId: string, sessionId: string): SessionDisputeEntity | null {
+    this.getSessionForParticipant(userId, sessionId);
+    return this.disputesBySession.get(sessionId) ?? null;
+  }
+
+  listSessionsForUser(userId: string): StudySessionEntity[] {
+    return Array.from(this.sessions.values())
+      .filter((s) => s.hostId === userId || s.partnerId === userId)
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+  }
+
   getRejectedTransitions(sessionId: string): RejectedTransitionLog[] {
     return this.rejectedTransitions.filter((r) => r.sessionId === sessionId);
   }

@@ -9,4 +9,8 @@ coverage/
 *.log
 .DS_Store
 Thumbs.db
-
+test-results/
+playwright-report/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
