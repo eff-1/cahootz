@@ -319,6 +319,18 @@ export function createCahootzHttpServer(
         clientTimestamp: ev.client_timestamp ? new Date(ev.client_timestamp) : null,
         serverTimestamp: new Date(ev.server_timestamp),
         payload: JSON.parse(ev.payload_json),
+      })),
+      (snap.tables.session_disputes ?? []).map((d: any) => ({
+        id: d.id,
+        sessionId: d.session_id,
+        appellantUserId: d.appellant_user_id,
+        reason: d.reason,
+        status: d.status,
+        resolutionNote: d.resolution_note,
+        filedAt: new Date(d.filed_at),
+        autoResolveAt: new Date(d.auto_resolve_at),
+        resolvedAt: d.resolved_at ? new Date(d.resolved_at) : null,
+        resolvedBy: d.resolved_by,
       }))
     );
 
@@ -361,6 +373,83 @@ export function createCahootzHttpServer(
         targetId: a.target_id,
         metadata: JSON.parse(a.metadata_json),
         createdAt: new Date(a.created_at),
+      })),
+      (snap.tables.moderation_reports ?? []).map((r: any) => ({
+        id: r.id,
+        institutionId: r.institution_id,
+        reporterId: r.reporter_id,
+        targetUserId: r.target_user_id,
+        targetType: r.target_type,
+        targetId: r.target_id,
+        category: r.category,
+        description: r.description,
+        evidenceSnapshot: JSON.parse(r.evidence_snapshot_json),
+        status: r.status,
+        slaDueAt: new Date(r.sla_due_at),
+        resolvedByModeratorId: r.resolved_by_moderator_id,
+        resolvedAt: r.resolved_at ? new Date(r.resolved_at) : null,
+        createdAt: new Date(r.created_at),
+      })),
+      (snap.tables.sanctions ?? []).map((s: any) => ({
+        id: s.id,
+        reportId: s.report_id,
+        targetUserId: s.target_user_id,
+        issuedByModeratorId: s.issued_by_moderator_id,
+        action: s.action,
+        reason: s.reason,
+        expiresAt: s.expires_at ? new Date(s.expires_at) : null,
+        isActive: Boolean(s.is_active),
+        createdAt: new Date(s.created_at),
+      })),
+      (snap.tables.appeals ?? []).map((ap: any) => ({
+        id: ap.id,
+        sanctionId: ap.sanction_id,
+        appellantUserId: ap.appellant_user_id,
+        reason: ap.reason,
+        status: ap.status,
+        reviewedByModeratorId: ap.reviewed_by_moderator_id,
+        reviewNote: ap.review_note,
+        createdAt: new Date(ap.created_at),
+        reviewedAt: ap.reviewed_at ? new Date(ap.reviewed_at) : null,
+      }))
+    );
+
+    communitiesService.hydrateFromSql(
+      (snap.tables.community_posts ?? []).map((p: any) => ({
+        id: p.id,
+        communityId: p.community_id,
+        institutionId: p.institution_id,
+        courseId: p.course_id,
+        authorId: p.author_id,
+        title: p.title,
+        body: p.body,
+        tags: JSON.parse(p.tags_json),
+        acceptedAnswerId: p.accepted_answer_id,
+        isRemoved: Boolean(p.is_removed),
+        createdAt: new Date(p.created_at),
+      })),
+      (snap.tables.community_answers ?? []).map((ans: any) => ({
+        id: ans.id,
+        postId: ans.post_id,
+        authorId: ans.author_id,
+        body: ans.body,
+        isAccepted: Boolean(ans.is_accepted),
+        isRemoved: Boolean(ans.is_removed),
+        createdAt: new Date(ans.created_at),
+      }))
+    );
+
+    administrationService.hydrateFromSql(
+      (snap.tables.sensitive_admin_actions ?? []).map((act: any) => ({
+        id: act.id,
+        actionType: act.action_type,
+        targetId: act.target_id,
+        reason: act.reason,
+        proposedByStaffId: act.proposed_by_staff_id,
+        approvedByStaffId: act.approved_by_staff_id,
+        status: act.status,
+        createdAt: new Date(act.created_at),
+        executedAt: act.executed_at ? new Date(act.executed_at) : null,
       }))
     );
 
@@ -401,6 +490,9 @@ export function createCahootzHttpServer(
         sqlStore.appendSessionEvent(ev);
       }
     }
+    for (const disp of studySessionsService.listAllDisputesForPersistence()) {
+      sqlStore.saveSessionDispute(disp);
+    }
     for (const xp of walletService.listAllXpEntriesForPersistence()) {
       sqlStore.appendXpLedger(xp);
     }
@@ -409,6 +501,24 @@ export function createCahootzHttpServer(
     }
     for (const aud of moderationService.listAllAuditLogsForPersistence()) {
       sqlStore.appendAuditLog(aud);
+    }
+    for (const rep of moderationService.listAllReportsForPersistence()) {
+      sqlStore.saveModerationReport(rep);
+    }
+    for (const sanc of moderationService.listAllSanctionsForPersistence()) {
+      sqlStore.saveSanction(sanc);
+    }
+    for (const app of moderationService.listAllAppealsForPersistence()) {
+      sqlStore.saveAppeal(app);
+    }
+    for (const post of communitiesService.listAllPostsForPersistence()) {
+      sqlStore.saveCommunityPost(post);
+    }
+    for (const ans of communitiesService.listAllAnswersForPersistence()) {
+      sqlStore.saveCommunityAnswer(ans);
+    }
+    for (const act of administrationService.listAllSensitiveActionsForPersistence()) {
+      sqlStore.saveSensitiveAdminAction(act);
     }
     for (const con of consentPrivacyService.listAllConsentsForPersistence()) {
       sqlStore.appendConsentLog(con);
@@ -588,7 +698,7 @@ export function createCahootzHttpServer(
         }
       }
 
-      // ─── Health & Readiness Probes ───────────────────────────────
+      // ─── Health, Readiness & Observability Probes (`/healthz`, `/readyz`, `/metrics`, `/api/v1/observability/metrics`) ───
       if (method === 'GET' && (pathname === '/healthz' || pathname === '/readyz')) {
         return {
           status: 200,
@@ -598,6 +708,61 @@ export function createCahootzHttpServer(
             service: `${BRAND_NAME} Modular Monolith API`,
             pilotInstitutionId: pilotSeed.institutionId,
             timestamp: new Date().toISOString(),
+          } as T,
+        };
+      }
+
+      if (
+        method === 'GET' &&
+        (pathname === '/metrics' || pathname === `${API_BASE_PATH}/observability/metrics`)
+      ) {
+        const tableCounts = sqlStore.getTableRowCounts();
+        let activeSseCount = 0;
+        for (const set of sseClientsBySession.values()) {
+          activeSseCount += set.size;
+        }
+        const openReports = moderationService
+          .listAllReportsForPersistence()
+          .filter((r) => r.status === 'OPEN');
+        const nowMs = Date.now();
+        const slaBreaches = openReports.filter((r) => r.slaDueAt.getTime() < nowMs).length;
+
+        if (pathname === '/metrics') {
+          const promLines = [
+            '# HELP cahootz_sse_active_connections Active Study Together SSE streams',
+            '# TYPE cahootz_sse_active_connections gauge',
+            `cahootz_sse_active_connections ${activeSseCount}`,
+            '# HELP cahootz_moderation_open_reports Open moderation reports in queue',
+            '# TYPE cahootz_moderation_open_reports gauge',
+            `cahootz_moderation_open_reports ${openReports.length}`,
+            '# HELP cahootz_moderation_sla_breaches Open moderation reports past SLA target',
+            '# TYPE cahootz_moderation_sla_breaches gauge',
+            `cahootz_moderation_sla_breaches ${slaBreaches}`,
+            ...Object.entries(tableCounts).map(
+              ([table, count]) => `cahootz_sqlite_table_rows{table="${table}"} ${count}`
+            ),
+          ];
+          return {
+            status: 200,
+            headers: responseHeaders,
+            body: (promLines.join('\n') + '\n') as unknown as T,
+            contentType: 'text/plain; version=0.0.4; charset=utf-8',
+          };
+        }
+
+        return {
+          status: 200,
+          headers: responseHeaders,
+          body: {
+            data: {
+              activeSseConnections: activeSseCount,
+              moderationQueue: {
+                openReportsCount: openReports.length,
+                slaBreachesCount: slaBreaches,
+              },
+              sqliteTableRowCounts: tableCounts,
+              timestamp: new Date().toISOString(),
+            },
           } as T,
         };
       }

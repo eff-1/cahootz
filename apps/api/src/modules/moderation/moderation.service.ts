@@ -136,9 +136,35 @@ export class ModerationService {
     return [...this.auditLog];
   }
 
-  hydrateFromSql(entries: AuditLogEntry[]): void {
+  listAllReportsForPersistence(): ModerationReportEntity[] {
+    return Array.from(this.reports.values());
+  }
+
+  listAllSanctionsForPersistence(): SanctionEntity[] {
+    return Array.from(this.sanctions.values());
+  }
+
+  listAllAppealsForPersistence(): AppealEntity[] {
+    return Array.from(this.appeals.values());
+  }
+
+  hydrateFromSql(
+    entries: AuditLogEntry[],
+    reports: ModerationReportEntity[] = [],
+    sanctions: SanctionEntity[] = [],
+    appeals: AppealEntity[] = []
+  ): void {
     for (const e of entries) {
       this.auditLog.push(Object.freeze(e));
+    }
+    for (const r of reports) {
+      this.reports.set(r.id, r);
+    }
+    for (const s of sanctions) {
+      this.sanctions.set(s.id, s);
+    }
+    for (const a of appeals) {
+      this.appeals.set(a.id, a);
     }
   }
 

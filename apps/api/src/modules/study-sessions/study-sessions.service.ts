@@ -1450,9 +1450,14 @@ export class StudySessionsService {
     return Array.from(this.sessions.values());
   }
 
+  listAllDisputesForPersistence(): SessionDisputeEntity[] {
+    return Array.from(this.disputesBySession.values());
+  }
+
   hydrateFromSql(
     sessions: StudySessionEntity[],
-    events: SessionEventRecord[]
+    events: SessionEventRecord[],
+    disputes: SessionDisputeEntity[] = []
   ): void {
     for (const s of sessions) {
       this.sessions.set(s.id, s);
@@ -1469,6 +1474,9 @@ export class StudySessionsService {
       if (ev.clientEventId) {
         this.clientEventIndex.set(`${ev.sessionId}:${ev.clientEventId}`, ev);
       }
+    }
+    for (const d of disputes) {
+      this.disputesBySession.set(d.sessionId, d);
     }
   }
 }

@@ -43,6 +43,16 @@ export class AdministrationService {
     );
   }
 
+  listAllSensitiveActionsForPersistence(): SensitiveActionRequest[] {
+    return Array.from(this.sensitiveActions.values());
+  }
+
+  hydrateFromSql(actions: SensitiveActionRequest[]): void {
+    for (const a of actions) {
+      this.sensitiveActions.set(a.id, a);
+    }
+  }
+
   setFeatureFlag(
     staffUser: AuthenticatedUser,
     flagKey: string,

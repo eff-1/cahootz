@@ -15,6 +15,13 @@ export interface SqlDatabaseSnapshot {
     direct_messages: Record<string, unknown>[];
     audit_log: Record<string, unknown>[];
     consent_log: Record<string, unknown>[];
+    moderation_reports: Record<string, unknown>[];
+    sanctions: Record<string, unknown>[];
+    appeals: Record<string, unknown>[];
+    community_posts: Record<string, unknown>[];
+    community_answers: Record<string, unknown>[];
+    sensitive_admin_actions: Record<string, unknown>[];
+    session_disputes: Record<string, unknown>[];
   };
 }
 
@@ -251,6 +258,96 @@ export class CahootzSqlStore {
       BEGIN
         SELECT RAISE(ABORT, 'DB_APPEND_ONLY_VIOLATION: consent_log rows cannot be deleted');
       END;
+
+      CREATE TABLE IF NOT EXISTS moderation_reports (
+        id TEXT PRIMARY KEY,
+        institution_id TEXT,
+        reporter_id TEXT NOT NULL,
+        target_user_id TEXT NOT NULL,
+        target_type TEXT NOT NULL,
+        target_id TEXT NOT NULL,
+        category TEXT NOT NULL,
+        description TEXT NOT NULL,
+        evidence_snapshot_json TEXT NOT NULL,
+        status TEXT NOT NULL,
+        sla_due_at TEXT NOT NULL,
+        resolved_by_moderator_id TEXT,
+        resolved_at TEXT,
+        created_at TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS sanctions (
+        id TEXT PRIMARY KEY,
+        report_id TEXT NOT NULL,
+        target_user_id TEXT NOT NULL,
+        issued_by_moderator_id TEXT NOT NULL,
+        action TEXT NOT NULL,
+        reason TEXT NOT NULL,
+        expires_at TEXT,
+        is_active INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS appeals (
+        id TEXT PRIMARY KEY,
+        sanction_id TEXT NOT NULL,
+        appellant_user_id TEXT NOT NULL,
+        reason TEXT NOT NULL,
+        status TEXT NOT NULL,
+        reviewed_by_moderator_id TEXT,
+        review_note TEXT,
+        created_at TEXT NOT NULL,
+        reviewed_at TEXT
+      );
+
+      CREATE TABLE IF NOT EXISTS community_posts (
+        id TEXT PRIMARY KEY,
+        community_id TEXT NOT NULL,
+        institution_id TEXT NOT NULL,
+        course_id TEXT NOT NULL,
+        author_id TEXT NOT NULL,
+        title TEXT NOT NULL,
+        body TEXT NOT NULL,
+        tags_json TEXT NOT NULL,
+        accepted_answer_id TEXT,
+        is_removed INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS community_answers (
+        id TEXT PRIMARY KEY,
+        post_id TEXT NOT NULL,
+        author_id TEXT NOT NULL,
+        body TEXT NOT NULL,
+        is_accepted INTEGER NOT NULL DEFAULT 0,
+        is_removed INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS sensitive_admin_actions (
+        id TEXT PRIMARY KEY,
+        action_type TEXT NOT NULL,
+        target_id TEXT NOT NULL,
+        reason TEXT NOT NULL,
+        proposed_by_staff_id TEXT NOT NULL,
+        approved_by_staff_id TEXT,
+        status TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        executed_at TEXT
+      );
+
+      CREATE TABLE IF NOT EXISTS session_disputes (
+        id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        appellant_user_id TEXT NOT NULL,
+        reason TEXT NOT NULL,
+        status TEXT NOT NULL,
+        resolution_note TEXT,
+        filed_at TEXT NOT NULL,
+        auto_resolve_at TEXT NOT NULL,
+        resolved_at TEXT,
+        resolved_by TEXT
+      );
     `);
   }
 
@@ -681,6 +778,283 @@ export class CahootzSqlStore {
     );
   }
 
+  saveModerationReport(r: {
+    id: string;
+    institutionId: string | null;
+    reporterId: string;
+    targetUserId: string;
+    targetType: string;
+    targetId: string;
+    category: string;
+    description: string;
+    evidenceSnapshot: Record<string, unknown>;
+    status: string;
+    slaDueAt: Date;
+    resolvedByModeratorId: string | null;
+    resolvedAt: Date | null;
+    createdAt: Date;
+  }): void {
+    const stmt = this.db.prepare(`
+      INSERT INTO moderation_reports (
+        id, institution_id, reporter_id, target_user_id, target_type, target_id,
+        category, description, evidence_snapshot_json, status, sla_due_at,
+        resolved_by_moderator_id, resolved_at, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        status = excluded.status,
+        resolved_by_moderator_id = excluded.resolved_by_moderator_id,
+        resolved_at = excluded.resolved_at
+    `);
+    stmt.run(
+      r.id,
+      r.institutionId,
+      r.reporterId,
+      r.targetUserId,
+      r.targetType,
+      r.targetId,
+      r.category,
+      r.description,
+      JSON.stringify(r.evidenceSnapshot),
+      r.status,
+      r.slaDueAt.toISOString(),
+      r.resolvedByModeratorId,
+      r.resolvedAt ? r.resolvedAt.toISOString() : null,
+      r.createdAt.toISOString()
+    );
+  }
+
+  saveSanction(s: {
+    id: string;
+    reportId: string;
+    targetUserId: string;
+    issuedByModeratorId: string;
+    action: string;
+    reason: string;
+    expiresAt: Date | null;
+    isActive: boolean;
+    createdAt: Date;
+  }): void {
+    const stmt = this.db.prepare(`
+      INSERT INTO sanctions (
+        id, report_id, target_user_id, issued_by_moderator_id, action,
+        reason, expires_at, is_active, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        is_active = excluded.is_active
+    `);
+    stmt.run(
+      s.id,
+      s.reportId,
+      s.targetUserId,
+      s.issuedByModeratorId,
+      s.action,
+      s.reason,
+      s.expiresAt ? s.expiresAt.toISOString() : null,
+      s.isActive ? 1 : 0,
+      s.createdAt.toISOString()
+    );
+  }
+
+  saveAppeal(a: {
+    id: string;
+    sanctionId: string;
+    appellantUserId: string;
+    reason: string;
+    status: string;
+    reviewedByModeratorId: string | null;
+    reviewNote: string | null;
+    createdAt: Date;
+    reviewedAt: Date | null;
+  }): void {
+    const stmt = this.db.prepare(`
+      INSERT INTO appeals (
+        id, sanction_id, appellant_user_id, reason, status,
+        reviewed_by_moderator_id, review_note, created_at, reviewed_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        status = excluded.status,
+        reviewed_by_moderator_id = excluded.reviewed_by_moderator_id,
+        review_note = excluded.review_note,
+        reviewed_at = excluded.reviewed_at
+    `);
+    stmt.run(
+      a.id,
+      a.sanctionId,
+      a.appellantUserId,
+      a.reason,
+      a.status,
+      a.reviewedByModeratorId,
+      a.reviewNote,
+      a.createdAt.toISOString(),
+      a.reviewedAt ? a.reviewedAt.toISOString() : null
+    );
+  }
+
+  saveCommunityPost(p: {
+    id: string;
+    communityId: string;
+    institutionId: string;
+    courseId: string;
+    authorId: string;
+    title: string;
+    body: string;
+    tags: string[];
+    acceptedAnswerId: string | null;
+    isRemoved: boolean;
+    createdAt: Date;
+  }): void {
+    const stmt = this.db.prepare(`
+      INSERT INTO community_posts (
+        id, community_id, institution_id, course_id, author_id, title, body,
+        tags_json, accepted_answer_id, is_removed, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        accepted_answer_id = excluded.accepted_answer_id,
+        is_removed = excluded.is_removed
+    `);
+    stmt.run(
+      p.id,
+      p.communityId,
+      p.institutionId,
+      p.courseId,
+      p.authorId,
+      p.title,
+      p.body,
+      JSON.stringify(p.tags),
+      p.acceptedAnswerId,
+      p.isRemoved ? 1 : 0,
+      p.createdAt.toISOString()
+    );
+  }
+
+  saveCommunityAnswer(a: {
+    id: string;
+    postId: string;
+    authorId: string;
+    body: string;
+    isAccepted: boolean;
+    isRemoved: boolean;
+    createdAt: Date;
+  }): void {
+    const stmt = this.db.prepare(`
+      INSERT INTO community_answers (
+        id, post_id, author_id, body, is_accepted, is_removed, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        is_accepted = excluded.is_accepted,
+        is_removed = excluded.is_removed
+    `);
+    stmt.run(
+      a.id,
+      a.postId,
+      a.authorId,
+      a.body,
+      a.isAccepted ? 1 : 0,
+      a.isRemoved ? 1 : 0,
+      a.createdAt.toISOString()
+    );
+  }
+
+  saveSensitiveAdminAction(act: {
+    id: string;
+    actionType: string;
+    targetId: string;
+    reason: string;
+    proposedByStaffId: string;
+    approvedByStaffId: string | null;
+    status: string;
+    createdAt: Date;
+    executedAt: Date | null;
+  }): void {
+    const stmt = this.db.prepare(`
+      INSERT INTO sensitive_admin_actions (
+        id, action_type, target_id, reason, proposed_by_staff_id,
+        approved_by_staff_id, status, created_at, executed_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        approved_by_staff_id = excluded.approved_by_staff_id,
+        status = excluded.status,
+        executed_at = excluded.executed_at
+    `);
+    stmt.run(
+      act.id,
+      act.actionType,
+      act.targetId,
+      act.reason,
+      act.proposedByStaffId,
+      act.approvedByStaffId,
+      act.status,
+      act.createdAt.toISOString(),
+      act.executedAt ? act.executedAt.toISOString() : null
+    );
+  }
+
+  saveSessionDispute(d: {
+    id: string;
+    sessionId: string;
+    appellantUserId: string;
+    reason: string;
+    status: string;
+    resolutionNote: string | null;
+    filedAt: Date;
+    autoResolveAt: Date;
+    resolvedAt: Date | null;
+    resolvedBy: string | null;
+  }): void {
+    const stmt = this.db.prepare(`
+      INSERT INTO session_disputes (
+        id, session_id, appellant_user_id, reason, status, resolution_note,
+        filed_at, auto_resolve_at, resolved_at, resolved_by
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        status = excluded.status,
+        resolution_note = excluded.resolution_note,
+        resolved_at = excluded.resolved_at,
+        resolved_by = excluded.resolved_by
+    `);
+    stmt.run(
+      d.id,
+      d.sessionId,
+      d.appellantUserId,
+      d.reason,
+      d.status,
+      d.resolutionNote,
+      d.filedAt.toISOString(),
+      d.autoResolveAt.toISOString(),
+      d.resolvedAt ? d.resolvedAt.toISOString() : null,
+      d.resolvedBy
+    );
+  }
+
+  getTableRowCounts(): Record<string, number> {
+    const tables = [
+      'users',
+      'auth_sessions',
+      'student_profiles',
+      'student_enrolments',
+      'study_invitations',
+      'study_sessions',
+      'session_events',
+      'xp_ledger',
+      'direct_messages',
+      'audit_log',
+      'consent_log',
+      'moderation_reports',
+      'sanctions',
+      'appeals',
+      'community_posts',
+      'community_answers',
+      'sensitive_admin_actions',
+      'session_disputes',
+    ];
+    const counts: Record<string, number> = {};
+    for (const t of tables) {
+      const row = this.db.prepare(`SELECT COUNT(*) AS cnt FROM ${t}`).get() as { cnt: number };
+      counts[t] = Number(row?.cnt ?? 0);
+    }
+    return counts;
+  }
+
   // ─── Full SQL Snapshot Export & Restore into Clean Database ──────
 
   exportSnapshot(now: Date = new Date()): SqlDatabaseSnapshot {
@@ -702,6 +1076,13 @@ export class CahootzSqlStore {
         direct_messages: queryAll('direct_messages'),
         audit_log: queryAll('audit_log'),
         consent_log: queryAll('consent_log'),
+        moderation_reports: queryAll('moderation_reports'),
+        sanctions: queryAll('sanctions'),
+        appeals: queryAll('appeals'),
+        community_posts: queryAll('community_posts'),
+        community_answers: queryAll('community_answers'),
+        sensitive_admin_actions: queryAll('sensitive_admin_actions'),
+        session_disputes: queryAll('session_disputes'),
       },
     };
   }

@@ -255,5 +255,34 @@ export class CommunitiesService {
     });
     return post;
   }
+
+  listAllPostsForPersistence(): CommunityPostEntity[] {
+    return Array.from(this.posts.values());
+  }
+
+  listAllAnswersForPersistence(): CommunityAnswerEntity[] {
+    const out: CommunityAnswerEntity[] = [];
+    for (const list of this.answersByPost.values()) {
+      out.push(...list);
+    }
+    return out;
+  }
+
+  hydrateFromSql(posts: CommunityPostEntity[], answers: CommunityAnswerEntity[]): void {
+    for (const p of posts) {
+      this.autoJoinCourseCommunity(p.authorId, p.courseId);
+      this.posts.set(p.id, p);
+      this.answersByPost.set(p.id, []);
+    }
+    for (const a of answers) {
+      const post = this.posts.get(a.postId);
+      if (post) {
+        this.autoJoinCourseCommunity(a.authorId, post.courseId);
+      }
+      const list = this.answersByPost.get(a.postId) ?? [];
+      list.push(a);
+      this.answersByPost.set(a.postId, list);
+    }
+  }
 }
 

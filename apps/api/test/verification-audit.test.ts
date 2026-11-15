@@ -153,6 +153,75 @@ describe('VERIFICATION AUDIT SUITE (Items 1, 2, 3, 4, 7, 9)', () => {
     assert.equal(dmRes.status, 201);
     const dmId = (dmRes.body as { data: { id: string } }).data.id;
 
+    // Create Community Post & Answer, Moderation Report, Sanction, Appeal & Two-Approver Admin Action on Server #1
+    const postRes = await server1.dispatch({
+      method: 'POST',
+      url: '/api/v1/communities/posts',
+      headers: { authorization: `Bearer ${tokenA}` },
+      body: {
+        courseId,
+        title: 'How does virtual memory paging work?',
+        body: 'Looking for a breakdown of multi-level page tables in CSC 301.',
+      },
+    });
+    assert.equal(postRes.status, 201);
+    const postId = (postRes.body as { data: { id: string } }).data.id;
+
+    const ansRes = await server1.dispatch({
+      method: 'POST',
+      url: `/api/v1/communities/posts/${postId}/answers`,
+      headers: { authorization: `Bearer ${tokenB}` },
+      body: { body: 'Multi-level page tables split the virtual address into directory and page offsets.' },
+    });
+    assert.equal(ansRes.status, 201);
+
+    const repRes = await server1.dispatch({
+      method: 'POST',
+      url: '/api/v1/moderation/reports',
+      headers: { authorization: `Bearer ${tokenA}` },
+      body: {
+        targetUserId: userBId,
+        targetType: 'USER',
+        targetId: userBId,
+        category: 'SPAM',
+        description: 'Persistence test report',
+      },
+    });
+    assert.equal(repRes.status, 201);
+    const repId = (repRes.body as { data: { id: string } }).data.id;
+
+    const mod1TokenRes = await server1.dispatch({
+      method: 'POST',
+      url: '/api/v1/auth/dev-staff-token',
+      body: { staffId: 'staff-mod-1', role: 'PLATFORM_MODERATOR' },
+    });
+    const mod1Token = (mod1TokenRes.body as { data: { accessToken: string } }).data.accessToken;
+
+    const sancRes = await server1.dispatch({
+      method: 'POST',
+      url: `/api/v1/moderation/reports/${repId}/sanctions`,
+      headers: { authorization: `Bearer ${mod1Token}` },
+      body: { action: 'WARN', reason: 'Persistence warning' },
+    });
+    assert.equal(sancRes.status, 200);
+    const sancId = (sancRes.body as { data: { sanction: { id: string } } }).data.sanction.id;
+
+    const appealRes = await server1.dispatch({
+      method: 'POST',
+      url: '/api/v1/moderation/appeals',
+      headers: { authorization: `Bearer ${tokenB}` },
+      body: { sanctionId: sancId, reason: 'Persistence appeal' },
+    });
+    assert.equal(appealRes.status, 201);
+
+    const actRes = await server1.dispatch({
+      method: 'POST',
+      url: '/api/v1/admin/actions',
+      headers: { authorization: `Bearer ${mod1Token}` },
+      body: { actionType: 'DISABLE_SAFETY_KILLSWITCH', targetId: 'MESSAGING_ENABLED', reason: 'Persist test' },
+    });
+    assert.equal(actRes.status, 201);
+
     // Shut down Server #1 completely (syncs & closes SQLite DB)
     await server1.close();
 
@@ -195,6 +264,53 @@ describe('VERIFICATION AUDIT SUITE (Items 1, 2, 3, 4, 7, 9)', () => {
     });
     assert.equal(getDm.status, 200);
     assert.equal((getDm.body as { data: { body: string } }).data.body, 'Ready for our study block!');
+
+    // Verify Community Posts & Answers survived restart
+    const getPosts = await server2.dispatch({
+      method: 'GET',
+      url: `/api/v1/communities/posts?courseId=${courseId}`,
+      headers: { authorization: `Bearer ${tokenA}` },
+    });
+    assert.equal(getPosts.status, 200);
+    const postsItems = (getPosts.body as { data: { items: Array<{ id: string; answers: unknown[] }> } }).data.items;
+    assert.equal(postsItems.length, 1);
+    assert.equal(postsItems[0]!.answers.length, 1);
+
+    // Verify Moderation Sanctions, Appeals, and Two-Approver Actions survived restart
+    const getModQueue = await server2.dispatch({
+      method: 'GET',
+      url: '/api/v1/moderation/queue?status=RESOLVED',
+      headers: { authorization: `Bearer ${mod1Token}` },
+    });
+    assert.equal(getModQueue.status, 200);
+    const modQueueData = (getModQueue.body as { data: { reports: unknown[]; appeals: unknown[] } }).data;
+    assert.equal(modQueueData.reports.length, 1);
+    assert.equal(modQueueData.appeals.length, 1);
+
+    const getAdminActs = await server2.dispatch({
+      method: 'GET',
+      url: '/api/v1/admin/actions',
+      headers: { authorization: `Bearer ${mod1Token}` },
+    });
+    assert.equal(getAdminActs.status, 200);
+    assert.equal((getAdminActs.body as { data: { items: unknown[] } }).data.items.length, 1);
+
+    // Verify /metrics (Prometheus) and /api/v1/observability/metrics (JSON) report all 18 SQLite tables
+    const promMetrics = await server2.dispatch({ method: 'GET', url: '/metrics' });
+    assert.equal(promMetrics.status, 200);
+    assert.ok(String(promMetrics.body).includes('cahootz_sqlite_table_rows{table="community_posts"} 1'));
+    assert.ok(String(promMetrics.body).includes('cahootz_sqlite_table_rows{table="sanctions"} 1'));
+
+    const jsonMetrics = await server2.dispatch({ method: 'GET', url: '/api/v1/observability/metrics' });
+    assert.equal(jsonMetrics.status, 200);
+    const counts = (jsonMetrics.body as { data: { sqliteTableRowCounts: Record<string, number> } }).data.sqliteTableRowCounts;
+    assert.equal(Object.keys(counts).length, 18);
+    assert.equal(counts.community_posts, 1);
+    assert.equal(counts.community_answers, 1);
+    assert.equal(counts.moderation_reports, 1);
+    assert.equal(counts.sanctions, 1);
+    assert.equal(counts.appeals, 1);
+    assert.equal(counts.sensitive_admin_actions, 1);
 
     await server2.close();
   });
