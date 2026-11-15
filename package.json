@@ -10,7 +10,8 @@
     "node": "24.18.1"
   },
   "scripts": {
-    "start": "node --experimental-strip-types apps/api/src/main.ts",
+    "build": "node scripts/build-dist.mjs",
+    "start": "node dist/apps/api/src/main.js",
     "dev": "node --experimental-strip-types --watch apps/api/src/main.ts",
     "test": "node --experimental-strip-types --test packages/shared/test/constants.test.ts packages/shared/test/uuidv7.test.ts apps/api/test/identity.test.ts apps/api/test/middleware.test.ts apps/api/test/m2-onboarding.test.ts apps/api/test/m3-discovery.test.ts apps/api/test/m4-study-together.test.ts apps/api/test/m5-safety-ops.test.ts apps/api/test/m6-security-threats.test.ts apps/api/test/m7-analytics-pilot.test.ts apps/api/test/http-server.e2e.test.ts apps/api/test/verification-audit.test.ts apps/api/test/email-provider.test.ts apps/worker/test/worker.test.ts",
     "test:browser": "npx playwright test",

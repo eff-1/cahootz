@@ -44,6 +44,7 @@ test.describe('Phase 2 Requirement C — Real Headless Chromium E2E & @axe-core/
       '/communities',
       '/messages',
       '/settings/privacy',
+      '/admin',
     ];
 
     const axeSummary: Array<{
@@ -275,6 +276,70 @@ test.describe('Phase 2 Requirement C — Real Headless Chromium E2E & @axe-core/
     await pageA.click('#export-data-btn');
     await expect(pageA.locator('#privacy-status')).toContainText('NDPA 2023 portable JSON data export generated');
     await expect(pageA.locator('#privacy-output')).toContainText('tunde.pw@live.unilag.edu.ng');
+
+    // 11. Test Course Communities Q&A on '/communities' (Ask -> Partner Answers -> Author Marks Accepted)
+    await pageA.goto(`${baseUrl}/communities`);
+    await pageA.fill('#post-title-input', 'How does Peterson algorithm prevent race conditions?');
+    await pageA.fill('#post-body-input', 'Can someone explain the role of the turn variable alongside the flag array?');
+    await pageA.click('#create-post-btn');
+    await expect(pageA.locator('#communities-status')).toContainText('Course Q&A question published!');
+
+    await pageB.goto(`${baseUrl}/communities`);
+    await expect(pageB.locator('#community-posts-list')).toContainText('How does Peterson algorithm prevent race conditions?');
+    await pageB.fill('.answer-input', 'The flag array signals readiness while turn breaks simultaneous entry ties.');
+    await pageB.click('.submit-answer-btn');
+    await expect(pageB.locator('#communities-status')).toContainText('Answer posted!');
+
+    await pageA.reload();
+    await expect(pageA.locator('.accept-answer-btn').first()).toBeVisible({ timeout: 10_000 });
+    await pageA.click('.accept-answer-btn');
+    await expect(pageA.locator('#communities-status')).toContainText('Accepted answer marked!');
+    await expect(pageA.locator('#community-posts-list')).toContainText('[ACCEPTED ANSWER]');
+
+    // 12. Test Moderator SLA Queue, Sanctions, Independent-Moderator Appeals & Two-Approver Admin Console on '/admin'
+    const userBId = await pageB.evaluate(() => JSON.parse(localStorage.getItem('cahootz_auth') || '{}').userId);
+    await pageA.goto(`${baseUrl}/messages`);
+    await pageA.fill('#chat-recipient-id', userBId);
+    await pageA.click('#report-user-btn');
+    await expect(pageA.locator('#messages-status')).toContainText('Report submitted');
+
+    // Moderator 1 issues a 24h restriction sanction on '/admin'
+    await pageA.goto(`${baseUrl}/admin`);
+    await pageA.click('#switch-mod1-btn');
+    await expect(pageA.locator('#admin-status')).toContainText('Signed in with MFA as staff-mod-1');
+    await expect(pageA.locator('.issue-sanction-btn').first()).toBeVisible({ timeout: 10_000 });
+    await pageA.click('.issue-sanction-btn');
+    await expect(pageA.locator('#admin-status')).toContainText('Sanction RESTRICT_24H issued');
+    const sanctionId = await pageA.locator('#appeal-sanction-id').inputValue();
+
+    // Student B submits an Appeal on '/admin'
+    await pageB.goto(`${baseUrl}/admin`);
+    await pageB.fill('#appeal-sanction-id', sanctionId);
+    await pageB.click('#submit-appeal-btn');
+    await expect(pageB.locator('#admin-status')).toContainText('Appeal submitted');
+
+    // Moderator 1 tries to review their own sanction -> blocked by Separation of Duties!
+    await pageA.click('#switch-mod1-btn');
+    await expect(pageA.locator('.overturn-appeal-btn').first()).toBeVisible({ timeout: 10_000 });
+    await pageA.click('.overturn-appeal-btn');
+    await expect(pageA.locator('#admin-status')).toContainText('Appeals must be reviewed by a different moderator');
+
+    // Moderator 2 reviews and overturns the appeal -> succeeds!
+    await pageA.click('#switch-mod2-btn');
+    await expect(pageA.locator('#admin-status')).toContainText('Signed in with MFA as staff-mod-2');
+    await pageA.click('.overturn-appeal-btn');
+    await expect(pageA.locator('#admin-status')).toContainText('Appeal OVERTURNED by staff-mod-2');
+
+    // Two-Approver Admin Action: Moderator 2 proposes, tries to self-approve -> blocked; Moderator 1 approves -> EXECUTED!
+    await pageA.click('#propose-admin-btn');
+    await expect(pageA.locator('#admin-status')).toContainText('Sensitive action proposed (PENDING_SECOND_APPROVAL)');
+    await pageA.click('.approve-admin-action-btn');
+    await expect(pageA.locator('#admin-status')).toContainText('Two-approver rule violation');
+
+    await pageA.click('#switch-mod1-btn');
+    await expect(pageA.locator('#admin-status')).toContainText('Signed in with MFA as staff-mod-1');
+    await pageA.click('.approve-admin-action-btn');
+    await expect(pageA.locator('#admin-status')).toContainText('Two-Approver action EXECUTED by staff-mod-1');
 
     await contextA.close();
     await contextB.close();

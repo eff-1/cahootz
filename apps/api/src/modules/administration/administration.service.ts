@@ -36,6 +36,13 @@ export class AdministrationService {
     return this.featureFlags.get(flagKey) ?? false;
   }
 
+  listSensitiveActions(staffUser: AuthenticatedUser): SensitiveActionRequest[] {
+    Policy.assertStaffWithMfa(staffUser);
+    return Array.from(this.sensitiveActions.values()).sort(
+      (a, b) => b.createdAt.getTime() - a.createdAt.getTime()
+    );
+  }
+
   setFeatureFlag(
     staffUser: AuthenticatedUser,
     flagKey: string,

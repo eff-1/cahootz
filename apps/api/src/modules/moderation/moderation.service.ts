@@ -218,6 +218,17 @@ export class ModerationService {
       .sort((a, b) => a.slaDueAt.getTime() - b.slaDueAt.getTime());
   }
 
+  listAppeals(moderator: AuthenticatedUser): AppealEntity[] {
+    Policy.assertStaffWithMfa(moderator);
+    return Array.from(this.appeals.values()).sort(
+      (a, b) => a.createdAt.getTime() - b.createdAt.getTime()
+    );
+  }
+
+  listSanctionsForUser(userId: string): SanctionEntity[] {
+    return Array.from(this.sanctions.values()).filter((s) => s.targetUserId === userId);
+  }
+
   // ─── Sanctions (`WARN`, `REMOVE_CONTENT`, `RESTRICT_24H`, `RESTRICT_7D`, `SUSPEND`) ───
 
   async resolveReportWithAction(

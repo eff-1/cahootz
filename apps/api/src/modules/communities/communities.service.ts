@@ -219,6 +219,21 @@ export class CommunitiesService {
     return post;
   }
 
+  listPostsForCourse(
+    userId: string,
+    courseId: string
+  ): Array<CommunityPostEntity & { answers: CommunityAnswerEntity[] }> {
+    this.getCommunityForCourse(userId, courseId);
+    const result: Array<CommunityPostEntity & { answers: CommunityAnswerEntity[] }> = [];
+    for (const post of this.posts.values()) {
+      if (post.courseId === courseId && !post.isRemoved) {
+        const answers = (this.answersByPost.get(post.id) ?? []).filter((a) => !a.isRemoved);
+        result.push({ ...post, answers });
+      }
+    }
+    return result.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+  }
+
   removePostByModerator(
     moderator: AuthenticatedUser,
     postId: string,

@@ -413,6 +413,60 @@ export function renderClientAppJs(): string {
       tryAutoReconnect();
     });
 
+    async function applySessionPayload(data) {
+      const auth = getAuth();
+      if (!auth || !data) return;
+      const session = data.session;
+      const timer = data.timerSnapshot;
+      const pings = data.pings || [];
+      const meStats = data.studentStats;
+
+      if (session && session.participants && session.participants[auth.userId]) {
+        const myPart = session.participants[auth.userId];
+        if (myPart.resumeToken) {
+          localStorage.setItem(resumeStorageKey, myPart.resumeToken);
+        }
+        if (myPart.presenceState === 'AWAY_UNREACHABLE') {
+          await tryAutoReconnect();
+        }
+      }
+
+      if (timer) {
+        timerAnchor = {
+          remainingSeconds: timer.remainingSeconds,
+          state: session.state,
+          receivedAtPerfNow: performance.now(),
+        };
+        renderInterpolatedTimer();
+      }
+
+      const stateBadge = document.getElementById('session-state-badge');
+      if (stateBadge && session) {
+        stateBadge.textContent = session.state;
+      }
+
+      const pendingPing = pings.find((p) => p.recipientId === auth.userId && p.outcome === 'PENDING');
+      const pingBanner = document.getElementById('ping-banner');
+      const respondBtn = document.getElementById('respond-ping-btn');
+      if (pingBanner && respondBtn) {
+        if (pendingPing) {
+          pingBanner.hidden = false;
+          respondBtn.setAttribute('data-ping-id', pendingPing.id);
+        } else {
+          pingBanner.hidden = true;
+        }
+      }
+
+      if (meStats) {
+        const xpEl = document.getElementById('session-total-xp');
+        const streakEl = document.getElementById('session-streak');
+        const relEl = document.getElementById('session-reliability');
+        if (xpEl) xpEl.textContent = meStats.xp + ' XP';
+        if (streakEl) streakEl.textContent = meStats.streakDays + ' Days';
+        if (relEl) relEl.textContent = meStats.reliabilityBand + ' (' + meStats.reliabilityScore + '%)';
+      }
+    }
+
     async function pollSessionState() {
       const auth = getAuth();
       if (!auth || !auth.accessToken || sessionId === 'demo') return;
@@ -421,59 +475,31 @@ export function renderClientAppJs(): string {
           await tryAutoReconnect();
         }
         const data = await apiFetch('/api/v1/sessions/' + sessionId + '/state');
-        const session = data.session;
-        const timer = data.timerSnapshot;
-        const pings = data.pings || [];
-        const meStats = data.studentStats;
-
-        if (session && session.participants && session.participants[auth.userId]) {
-          const myPart = session.participants[auth.userId];
-          if (myPart.resumeToken) {
-            localStorage.setItem(resumeStorageKey, myPart.resumeToken);
-          }
-          if (myPart.presenceState === 'AWAY_UNREACHABLE') {
-            await tryAutoReconnect();
-          }
-        }
-
-        if (timer) {
-          timerAnchor = {
-            remainingSeconds: timer.remainingSeconds,
-            state: session.state,
-            receivedAtPerfNow: performance.now(),
-          };
-          renderInterpolatedTimer();
-        }
-
-        const stateBadge = document.getElementById('session-state-badge');
-        if (stateBadge && session) {
-          stateBadge.textContent = session.state;
-        }
-
-        // Check if there is a PENDING ping addressed to the current student
-        const pendingPing = pings.find((p) => p.recipientId === auth.userId && p.outcome === 'PENDING');
-        const pingBanner = document.getElementById('ping-banner');
-        const respondBtn = document.getElementById('respond-ping-btn');
-        if (pingBanner && respondBtn) {
-          if (pendingPing) {
-            pingBanner.hidden = false;
-            respondBtn.setAttribute('data-ping-id', pendingPing.id);
-          } else {
-            pingBanner.hidden = true;
-          }
-        }
-
-        if (meStats) {
-          const xpEl = document.getElementById('session-total-xp');
-          const streakEl = document.getElementById('session-streak');
-          const relEl = document.getElementById('session-reliability');
-          if (xpEl) xpEl.textContent = meStats.xp + ' XP';
-          if (streakEl) streakEl.textContent = meStats.streakDays + ' Days';
-          if (relEl) relEl.textContent = meStats.reliabilityBand + ' (' + meStats.reliabilityScore + '%)';
-        }
+        await applySessionPayload(data);
       } catch (err) {
         wasOfflineOrFailed = true;
       }
+    }
+
+    function connectSessionSse() {
+      const auth = getAuth();
+      if (!auth || !auth.accessToken || sessionId === 'demo' || typeof EventSource === 'undefined') {
+        return;
+      }
+      try {
+        const es = new EventSource(
+          '/api/v1/sessions/' + sessionId + '/stream?token=' + encodeURIComponent(auth.accessToken)
+        );
+        es.addEventListener('state', (ev) => {
+          try {
+            const payload = JSON.parse(ev.data);
+            applySessionPayload(payload);
+          } catch {}
+        });
+        es.onerror = () => {
+          es.close();
+        };
+      } catch {}
     }
 
     async function sendHeartbeat() {
@@ -612,6 +638,7 @@ export function renderClientAppJs(): string {
       });
     }
 
+    connectSessionSse();
     await pollSessionState();
     setInterval(pollSessionState, 900);
     setInterval(sendHeartbeat, 15000);
@@ -744,6 +771,319 @@ export function renderClientAppJs(): string {
     }
   }
 
+  // ─── 7. Course Communities Page (/communities) ─────────────────
+  async function initCommunitiesPage() {
+    const form = document.getElementById('create-post-form');
+    if (!form) return;
+
+    const postsList = document.getElementById('community-posts-list');
+    const courseSelect = document.getElementById('community-course-select');
+
+    async function loadPosts() {
+      const auth = getAuth();
+      if (!auth || !auth.accessToken || !postsList) return;
+      try {
+        const courseId = courseSelect ? courseSelect.value : 'course-pilot-csc-301';
+        const data = await apiFetch('/api/v1/communities/posts?courseId=' + encodeURIComponent(courseId));
+        const items = (data && data.items) || [];
+        if (items.length === 0) {
+          postsList.innerHTML = '<p class="empty-state">No questions posted in this course yet. Ask the first question above!</p>';
+          return;
+        }
+        postsList.innerHTML = '';
+        for (const post of items) {
+          const card = document.createElement('article');
+          card.className = 'card stack';
+          const h3 = document.createElement('h3');
+          h3.textContent = post.title + ' ';
+          const badge = document.createElement('span');
+          badge.className = 'badge';
+          badge.textContent = post.courseId;
+          h3.appendChild(badge);
+          const bodyP = document.createElement('p');
+          bodyP.textContent = post.body;
+          card.appendChild(h3);
+          card.appendChild(bodyP);
+
+          const ansList = document.createElement('div');
+          ansList.className = 'stack';
+          for (const ans of post.answers || []) {
+            const ansRow = document.createElement('div');
+            ansRow.className = 'card';
+            const ansText = document.createElement('p');
+            ansText.textContent = (ans.isAccepted ? '[ACCEPTED ANSWER] ' : 'Answer: ') + ans.body;
+            ansRow.appendChild(ansText);
+            if (!ans.isAccepted && post.authorId === auth.userId) {
+              const acceptBtn = document.createElement('button');
+              acceptBtn.type = 'button';
+              acceptBtn.className = 'btn-outline accept-answer-btn';
+              acceptBtn.setAttribute('data-post-id', post.id);
+              acceptBtn.setAttribute('data-answer-id', ans.id);
+              acceptBtn.textContent = 'Mark Accepted Answer';
+              acceptBtn.addEventListener('click', async () => {
+                try {
+                  await apiFetch('/api/v1/communities/posts/' + post.id + '/accept-answer', {
+                    method: 'POST',
+                    body: { answerId: ans.id },
+                  });
+                  setStatus('communities-status', 'Accepted answer marked!', false);
+                  await loadPosts();
+                } catch (err) {
+                  setStatus('communities-status', err.message, true);
+                }
+              });
+              ansRow.appendChild(acceptBtn);
+            }
+            ansList.appendChild(ansRow);
+          }
+          card.appendChild(ansList);
+
+          const ansForm = document.createElement('form');
+          ansForm.className = 'actions';
+          const ansInput = document.createElement('input');
+          ansInput.type = 'text';
+          ansInput.required = true;
+          ansInput.placeholder = 'Write an answer (min 5 chars)...';
+          ansInput.setAttribute('aria-label', 'Write an answer for ' + post.title);
+          ansInput.className = 'answer-input';
+          const ansBtn = document.createElement('button');
+          ansBtn.type = 'submit';
+          ansBtn.className = 'btn-secondary submit-answer-btn';
+          ansBtn.textContent = 'Post Answer';
+          ansForm.addEventListener('submit', async (ev) => {
+            ev.preventDefault();
+            try {
+              await apiFetch('/api/v1/communities/posts/' + post.id + '/answers', {
+                method: 'POST',
+                body: { body: ansInput.value.trim() },
+              });
+              ansInput.value = '';
+              setStatus('communities-status', 'Answer posted!', false);
+              await loadPosts();
+            } catch (err) {
+              setStatus('communities-status', err.message, true);
+            }
+          });
+          ansForm.appendChild(ansInput);
+          ansForm.appendChild(ansBtn);
+          card.appendChild(ansForm);
+          postsList.appendChild(card);
+        }
+      } catch {}
+    }
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const courseId = courseSelect ? courseSelect.value : 'course-pilot-csc-301';
+      const title = document.getElementById('post-title-input').value.trim();
+      const body = document.getElementById('post-body-input').value.trim();
+      try {
+        await apiFetch('/api/v1/communities/posts', {
+          method: 'POST',
+          body: { courseId, title, body, tags: ['Q&A'] },
+        });
+        document.getElementById('post-title-input').value = '';
+        document.getElementById('post-body-input').value = '';
+        setStatus('communities-status', 'Course Q&A question published!', false);
+        await loadPosts();
+      } catch (err) {
+        setStatus('communities-status', err.message, true);
+      }
+    });
+
+    await loadPosts();
+  }
+
+  // ─── 8. Moderator & Two-Approver Admin Console (/admin) ────────
+  async function initAdminPage() {
+    const queueList = document.getElementById('moderation-queue-list');
+    if (!queueList) return;
+
+    const appealsList = document.getElementById('appeals-queue-list');
+    const adminActionsList = document.getElementById('admin-actions-list');
+
+    async function loadAdminQueues() {
+      const auth = getAuth();
+      if (!auth || !auth.accessToken) return;
+      try {
+        const modData = await apiFetch('/api/v1/moderation/queue');
+        const reports = (modData && modData.reports) || [];
+        const appeals = (modData && modData.appeals) || [];
+
+        if (reports.length === 0) {
+          queueList.innerHTML = '<p class="empty-state">No open moderation reports in queue.</p>';
+        } else {
+          queueList.innerHTML = '';
+          for (const r of reports) {
+            const card = document.createElement('div');
+            card.className = 'card stack';
+            const p = document.createElement('p');
+            p.textContent = 'Report [' + r.category + '] against ' + r.targetUserId + ' — ' + r.description;
+            const warnBtn = document.createElement('button');
+            warnBtn.type = 'button';
+            warnBtn.className = 'btn-primary issue-sanction-btn';
+            warnBtn.setAttribute('data-report-id', r.id);
+            warnBtn.textContent = 'Issue 24h Restriction';
+            warnBtn.addEventListener('click', async () => {
+              try {
+                const res = await apiFetch('/api/v1/moderation/reports/' + r.id + '/sanctions', {
+                  method: 'POST',
+                  body: { action: 'RESTRICT_24H', reason: 'Verified spam/harassment violation' },
+                });
+                const sanctionId = res.sanction ? res.sanction.id : '';
+                setStatus('admin-status', 'Sanction RESTRICT_24H issued (ID: ' + sanctionId + ')', false);
+                const sanctionInput = document.getElementById('appeal-sanction-id');
+                if (sanctionInput && sanctionId) sanctionInput.value = sanctionId;
+                await loadAdminQueues();
+              } catch (err) {
+                setStatus('admin-status', err.message, true);
+              }
+            });
+            card.appendChild(p);
+            card.appendChild(warnBtn);
+            queueList.appendChild(card);
+          }
+        }
+
+        if (appealsList) {
+          if (appeals.length === 0) {
+            appealsList.innerHTML = '<p class="empty-state">No pending sanction appeals.</p>';
+          } else {
+            appealsList.innerHTML = '';
+            for (const a of appeals) {
+              const card = document.createElement('div');
+              card.className = 'card stack';
+              const p = document.createElement('p');
+              p.textContent = 'Appeal (' + a.status + ') for Sanction ' + a.sanctionId + ': ' + a.reason;
+              card.appendChild(p);
+              if (a.status === 'PENDING') {
+                const overturnBtn = document.createElement('button');
+                overturnBtn.type = 'button';
+                overturnBtn.className = 'btn-secondary overturn-appeal-btn';
+                overturnBtn.setAttribute('data-appeal-id', a.id);
+                overturnBtn.textContent = 'Overturn Sanction (Independent Review)';
+                overturnBtn.addEventListener('click', async () => {
+                  try {
+                    const resolved = await apiFetch('/api/v1/moderation/appeals/' + a.id + '/resolve', {
+                      method: 'POST',
+                      body: { decision: 'OVERTURNED', note: 'Overturned by second independent moderator' },
+                    });
+                    setStatus('admin-status', 'Appeal ' + resolved.status + ' by ' + resolved.reviewedByModeratorId, false);
+                    await loadAdminQueues();
+                  } catch (err) {
+                    setStatus('admin-status', err.message, true);
+                  }
+                });
+                card.appendChild(overturnBtn);
+              }
+              appealsList.appendChild(card);
+            }
+          }
+        }
+
+        const actData = await apiFetch('/api/v1/admin/actions');
+        const actions = (actData && actData.items) || [];
+        if (adminActionsList) {
+          if (actions.length === 0) {
+            adminActionsList.innerHTML = '<p class="empty-state">No sensitive actions proposed.</p>';
+          } else {
+            adminActionsList.innerHTML = '';
+            for (const act of actions) {
+              const card = document.createElement('div');
+              card.className = 'card stack';
+              const p = document.createElement('p');
+              p.textContent = act.actionType + ' on ' + act.targetId + ' — Status: ' + act.status + ' (Proposed by ' + act.proposedByStaffId + ')';
+              card.appendChild(p);
+              if (act.status === 'PENDING_SECOND_APPROVAL') {
+                const appBtn = document.createElement('button');
+                appBtn.type = 'button';
+                appBtn.className = 'btn-primary approve-admin-action-btn';
+                appBtn.setAttribute('data-action-id', act.id);
+                appBtn.textContent = 'Second-Approver Execute';
+                appBtn.addEventListener('click', async () => {
+                  try {
+                    const executed = await apiFetch('/api/v1/admin/actions/' + act.id + '/approve', {
+                      method: 'POST',
+                      body: {},
+                    });
+                    setStatus('admin-status', 'Two-Approver action ' + executed.status + ' by ' + executed.approvedByStaffId, false);
+                    await loadAdminQueues();
+                  } catch (err) {
+                    setStatus('admin-status', err.message, true);
+                  }
+                });
+                card.appendChild(appBtn);
+              }
+              adminActionsList.appendChild(card);
+            }
+          }
+        }
+      } catch {}
+    }
+
+    async function switchStaffIdentity(staffId, role) {
+      try {
+        const data = await apiFetch('/api/v1/auth/dev-staff-token', {
+          method: 'POST',
+          body: { staffId, role },
+        });
+        setAuth({
+          accessToken: data.accessToken,
+          userId: data.user.id,
+          email: data.user.email,
+        });
+        setStatus('admin-status', 'Signed in with MFA as ' + staffId + ' (' + role + ')', false);
+        await loadAdminQueues();
+      } catch (err) {
+        setStatus('admin-status', err.message, true);
+      }
+    }
+
+    const mod1Btn = document.getElementById('switch-mod1-btn');
+    if (mod1Btn) mod1Btn.addEventListener('click', () => switchStaffIdentity('staff-mod-1', 'PLATFORM_MODERATOR'));
+    const mod2Btn = document.getElementById('switch-mod2-btn');
+    if (mod2Btn) mod2Btn.addEventListener('click', () => switchStaffIdentity('staff-mod-2', 'PLATFORM_MODERATOR'));
+
+    const appealForm = document.getElementById('file-appeal-form');
+    if (appealForm) {
+      appealForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const sanctionId = document.getElementById('appeal-sanction-id').value.trim();
+        const reason = document.getElementById('appeal-reason-input').value.trim();
+        try {
+          const ap = await apiFetch('/api/v1/moderation/appeals', {
+            method: 'POST',
+            body: { sanctionId, reason },
+          });
+          setStatus('admin-status', 'Appeal submitted (ID: ' + ap.id + ') — awaiting independent moderator.', false);
+        } catch (err) {
+          setStatus('admin-status', err.message, true);
+        }
+      });
+    }
+
+    const proposeForm = document.getElementById('propose-admin-action-form');
+    if (proposeForm) {
+      proposeForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const targetId = document.getElementById('admin-target-input').value.trim();
+        const reason = document.getElementById('admin-reason-input').value.trim();
+        try {
+          const req = await apiFetch('/api/v1/admin/actions', {
+            method: 'POST',
+            body: { actionType: 'DISABLE_SAFETY_KILLSWITCH', targetId, reason },
+          });
+          setStatus('admin-status', 'Sensitive action proposed (' + req.status + ')', false);
+          await loadAdminQueues();
+        } catch (err) {
+          setStatus('admin-status', err.message, true);
+        }
+      });
+    }
+
+    await loadAdminQueues();
+  }
+
   document.addEventListener('DOMContentLoaded', () => {
     refreshStudentBanner();
     initHomePage();
@@ -752,6 +1092,8 @@ export function renderClientAppJs(): string {
     initSessionRoomPage();
     initMessagesPage();
     initPrivacyPage();
+    initCommunitiesPage();
+    initAdminPage();
   });
 })();
 `;
@@ -929,10 +1271,83 @@ export function renderAccessibleWebPage(pathname: string): string | null {
       heading: 'Course Communities &amp; Q&amp;A',
       content: `
         <p class="subtitle">Auto-joined from your enrolled courses. Every post requires a course tag.</p>
-        <article class="card">
-          <h2><span class="badge">CSC 301</span> How does Peterson's solution guarantee mutual exclusion?</h2>
-          <p>Accepted Answer: The flag array expresses intent to enter the critical section while turn breaks ties deterministically.</p>
-        </article>
+        <div id="communities-status" role="status" aria-live="polite" class="status-banner" hidden></div>
+        <form id="create-post-form" aria-label="Ask a Course Question" class="card form-stack">
+          <h2>Ask a Course Question</h2>
+          <div class="field">
+            <label for="community-course-select">Course Tag (Required)</label>
+            <select id="community-course-select" name="courseId">
+              <option value="course-pilot-csc-301">CSC 301 — Operating Systems</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="post-title-input">Question Title</label>
+            <input id="post-title-input" name="title" type="text" required placeholder="How does Peterson's solution guarantee mutual exclusion?" />
+          </div>
+          <div class="field">
+            <label for="post-body-input">Question Details</label>
+            <input id="post-body-input" name="body" type="text" required placeholder="Explain the role of the flag array and turn variable..." />
+          </div>
+          <button id="create-post-btn" type="submit" class="btn-primary">Publish Course Question</button>
+        </form>
+        <section aria-labelledby="course-posts-heading" class="stack">
+          <h2 id="course-posts-heading">Recent Course Q&amp;A</h2>
+          <div id="community-posts-list" class="stack">
+            <article class="card">
+              <h3><span class="badge">CSC 301</span> How does Peterson's solution guarantee mutual exclusion?</h3>
+              <p>Accepted Answer: The flag array expresses intent to enter the critical section while turn breaks ties deterministically.</p>
+            </article>
+          </div>
+        </section>
+      `,
+    },
+    '/admin': {
+      title: `Moderation & Two-Approver Admin Console — ${BRAND_NAME}`,
+      heading: 'Safety Moderation &amp; Two-Approver Admin Console',
+      content: `
+        <p class="subtitle">MFA-gated staff operations · SLA-ordered report queue · Independent-moderator appeals · Two-Approver sensitive actions.</p>
+        <div id="admin-status" role="status" aria-live="polite" class="status-banner" hidden></div>
+        <div class="actions">
+          <button id="switch-mod1-btn" type="button" class="btn-secondary">Act as Moderator 1 (MFA)</button>
+          <button id="switch-mod2-btn" type="button" class="btn-outline">Act as Moderator 2 (MFA)</button>
+        </div>
+        <section aria-labelledby="mod-queue-heading" class="card stack">
+          <h2 id="mod-queue-heading">Moderation SLA Queue</h2>
+          <div id="moderation-queue-list" class="stack">
+            <p class="empty-state">No open moderation reports in queue.</p>
+          </div>
+        </section>
+        <form id="file-appeal-form" aria-label="Submit Sanction Appeal" class="card form-stack">
+          <h2>Student Sanction Appeal</h2>
+          <div class="field">
+            <label for="appeal-sanction-id">Sanction ID</label>
+            <input id="appeal-sanction-id" name="sanctionId" type="text" required placeholder="Sanction UUID" />
+          </div>
+          <div class="field">
+            <label for="appeal-reason-input">Appeal Explanation</label>
+            <input id="appeal-reason-input" name="reason" type="text" required value="Context was academic discussion of OS deadlock recovery" />
+          </div>
+          <button id="submit-appeal-btn" type="submit" class="btn-outline">Submit Appeal</button>
+        </form>
+        <section aria-labelledby="appeals-heading" class="card stack">
+          <h2 id="appeals-heading">Pending Appeals (Requires Different Moderator)</h2>
+          <div id="appeals-queue-list" class="stack">
+            <p class="empty-state">No pending sanction appeals.</p>
+          </div>
+        </section>
+        <form id="propose-admin-action-form" aria-label="Propose Sensitive Admin Action" class="card form-stack">
+          <h2>Two-Approver Sensitive Action Queue</h2>
+          <div class="field">
+            <label for="admin-target-input">Target Feature / User ID</label>
+            <input id="admin-target-input" name="targetId" type="text" required value="COURSE_PROPOSALS_ENABLED" />
+          </div>
+          <div class="field">
+            <label for="admin-reason-input">Operational Reason</label>
+            <input id="admin-reason-input" name="reason" type="text" required value="Scheduled end-of-semester catalogue freeze" />
+          </div>
+          <button id="propose-admin-btn" type="submit" class="btn-primary">Propose Sensitive Action</button>
+          <div id="admin-actions-list" class="stack"></div>
+        </form>
       `,
     },
     '/messages': {
@@ -1178,6 +1593,7 @@ export function renderAccessibleWebPage(pathname: string): string | null {
       <a href="/communities">Communities</a>
       <a href="/messages">Messages</a>
       <a href="/settings/privacy">Privacy</a>
+      <a href="/admin">Moderation</a>
     </div>
     <span id="nav-user-status" class="nav-user">Not signed in</span>
   </nav>

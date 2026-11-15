@@ -47,9 +47,12 @@ jobs:
       - name: Real Browser E2E & @axe-core/playwright Accessibility Suite
         run: npx playwright test
 
-      - name: Start Cahootz Server with Persisted SQLite DB
+      - name: Build Pure ES Modules (dist/)
+        run: npm run build
+
+      - name: Start Cahootz Server (Compiled Production JS) with Persisted SQLite DB
         run: |
-          CAHOOTZ_DB_PATH=./ci-cahootz.sqlite PORT=4100 node --experimental-strip-types apps/api/src/main.ts &
+          CAHOOTZ_DB_PATH=./ci-cahootz.sqlite PORT=4100 node dist/apps/api/src/main.js &
           for i in $(seq 1 30); do
             if curl -fsS http://127.0.0.1:4100/api/v1/health >/dev/null 2>&1; then
               echo "Server healthy on port 4100"

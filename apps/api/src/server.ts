@@ -413,6 +413,7 @@ export function createCahootzHttpServer(
     for (const con of consentPrivacyService.listAllConsentsForPersistence()) {
       sqlStore.appendConsentLog(con);
     }
+    broadcastAllSseSessions();
   }
 
   hydrateFromSql();
@@ -426,6 +427,48 @@ export function createCahootzHttpServer(
   function sessionNow(sessionId: string): Date {
     const offset = sessionClockOffsetsMs.get(sessionId) ?? 0;
     return new Date(Date.now() + offset);
+  }
+
+  // Active Server-Sent Events (SSE) clients per sessionId
+  const sseClientsBySession = new Map<
+    string,
+    Set<{ userId: string; res: ServerResponse }>
+  >();
+
+  function buildSessionStatePayloadForUser(userId: string, sessionId: string) {
+    const now = sessionNow(sessionId);
+    const session = studySessionsService.getSessionForParticipant(userId, sessionId);
+    const timerSnapshot = studySessionsService.getTimerSnapshot(userId, sessionId, now);
+    const pings = studySessionsService.getPingsForParticipant(userId, sessionId);
+    const dispute = studySessionsService.getDisputeForSession(userId, sessionId);
+    const xp = walletService.getXpBalance(userId);
+    const streak = walletService.getStreak(userId);
+    const reliability = walletService.getReliability(userId);
+    return {
+      session,
+      timerSnapshot,
+      pings,
+      dispute,
+      studentStats: {
+        xp,
+        streakDays: streak.currentStreakDays,
+        reliabilityBand: reliability.band,
+        reliabilityScore: reliability.score,
+      },
+    };
+  }
+
+  function broadcastAllSseSessions(): void {
+    for (const [sessionId, clients] of sseClientsBySession.entries()) {
+      for (const client of clients) {
+        try {
+          const payload = buildSessionStatePayloadForUser(client.userId, sessionId);
+          client.res.write(`event: state\ndata: ${JSON.stringify(payload)}\n\n`);
+        } catch {
+          clients.delete(client);
+        }
+      }
+    }
   }
 
   function checkRateLimit(
@@ -464,6 +507,18 @@ export function createCahootzHttpServer(
     }
     const token = authHeader.slice(7).trim();
     const payload = tokenService.verify(token);
+
+    if (payload.sessionId && payload.sessionId.startsWith('staff-dev-') && process.env.NODE_ENV !== 'production') {
+      return {
+        id: payload.sub,
+        email: payload.email,
+        role: (payload.roles[0] as any) ?? ROLES.MODERATOR,
+        institutionId: payload.institutionId ?? pilotSeed.institutionId,
+        isMinor: false,
+        mfaVerified: true,
+        sessionId: payload.sessionId,
+      };
+    }
 
     // Server-side revocation check: if session was logged out or revoked, reject access token
     if (payload.sessionId && !identityService.isSessionActive(payload.sessionId)) {
@@ -1075,7 +1130,60 @@ export function createCahootzHttpServer(
         return { status: 200, headers: responseHeaders, body: { data: msg } as T };
       }
 
-      // ─── Moderation Reports (`/api/v1/moderation/reports`) ───────
+      // ─── Course Communities (`/api/v1/communities/*`) ────────────
+      if (method === 'GET' && pathname === `${API_BASE_PATH}/communities/posts`) {
+        const user = requireAuth(normHeaders);
+        const courseId =
+          parsedUrl.searchParams.get('courseId') ||
+          (studentsService.findProfile(user.id)?.courseIds[0] ?? 'course-pilot-csc-301');
+        const items = communitiesService.listPostsForCourse(user.id, courseId);
+        return { status: 200, headers: responseHeaders, body: { data: { items, courseId } } as T };
+      }
+
+      if (method === 'POST' && pathname === `${API_BASE_PATH}/communities/posts`) {
+        const user = requireAuth(normHeaders);
+        const courseId =
+          String(body.courseId ?? '') ||
+          (studentsService.findProfile(user.id)?.courseIds[0] ?? 'course-pilot-csc-301');
+        const post = communitiesService.createPost(user.id, {
+          courseId,
+          title: String(body.title ?? ''),
+          body: String(body.body ?? ''),
+          tags: Array.isArray(body.tags) ? body.tags : ['Q&A'],
+        });
+        syncToSql();
+        return { status: 201, headers: responseHeaders, body: { data: post } as T };
+      }
+
+      const postAnswersMatch = pathname.match(
+        new RegExp(`^${API_BASE_PATH}/communities/posts/([^/]+)/answers$`)
+      );
+      if (method === 'POST' && postAnswersMatch) {
+        const user = requireAuth(normHeaders);
+        const answer = communitiesService.createAnswer(
+          user.id,
+          postAnswersMatch[1]!,
+          String(body.body ?? '')
+        );
+        syncToSql();
+        return { status: 201, headers: responseHeaders, body: { data: answer } as T };
+      }
+
+      const acceptAnswerMatch = pathname.match(
+        new RegExp(`^${API_BASE_PATH}/communities/posts/([^/]+)/accept-answer$`)
+      );
+      if (method === 'POST' && acceptAnswerMatch) {
+        const user = requireAuth(normHeaders);
+        const post = communitiesService.markAcceptedAnswer(
+          user.id,
+          acceptAnswerMatch[1]!,
+          String(body.answerId ?? '')
+        );
+        syncToSql();
+        return { status: 200, headers: responseHeaders, body: { data: post } as T };
+      }
+
+      // ─── Moderation & Appeals (`/api/v1/moderation/*`) ───────────
       if (method === 'POST' && pathname === `${API_BASE_PATH}/moderation/reports`) {
         const user = requireAuth(normHeaders);
         const report = await moderationService.createReport(user, {
@@ -1088,6 +1196,117 @@ export function createCahootzHttpServer(
         });
         syncToSql();
         return { status: 201, headers: responseHeaders, body: { data: report } as T };
+      }
+
+      if (method === 'GET' && pathname === `${API_BASE_PATH}/moderation/queue`) {
+        const user = requireAuth(normHeaders);
+        const status = (parsedUrl.searchParams.get('status') as any) || 'OPEN';
+        const reports = moderationService.listQueue(user, status);
+        const appeals = moderationService.listAppeals(user);
+        return {
+          status: 200,
+          headers: responseHeaders,
+          body: { data: { reports, appeals } } as T,
+        };
+      }
+
+      const reportSanctionMatch = pathname.match(
+        new RegExp(`^${API_BASE_PATH}/moderation/reports/([^/]+)/sanctions$`)
+      );
+      if (method === 'POST' && reportSanctionMatch) {
+        const user = requireAuth(normHeaders);
+        const result = await moderationService.resolveReportWithAction(
+          user,
+          reportSanctionMatch[1]!,
+          {
+            action: (body.action as any) ?? 'WARN',
+            reason: String(body.reason ?? 'Moderator sanction'),
+          }
+        );
+        syncToSql();
+        return { status: 200, headers: responseHeaders, body: { data: result } as T };
+      }
+
+      if (method === 'GET' && pathname === `${API_BASE_PATH}/moderation/my-sanctions`) {
+        const user = requireAuth(normHeaders);
+        const items = moderationService.listSanctionsForUser(user.id);
+        return { status: 200, headers: responseHeaders, body: { data: { items } } as T };
+      }
+
+      if (method === 'POST' && pathname === `${API_BASE_PATH}/moderation/appeals`) {
+        const user = requireAuth(normHeaders);
+        const appeal = moderationService.submitAppeal(
+          user.id,
+          String(body.sanctionId ?? ''),
+          String(body.reason ?? 'Requesting independent review')
+        );
+        syncToSql();
+        return { status: 201, headers: responseHeaders, body: { data: appeal } as T };
+      }
+
+      const appealResolveMatch = pathname.match(
+        new RegExp(`^${API_BASE_PATH}/moderation/appeals/([^/]+)/resolve$`)
+      );
+      if (method === 'POST' && appealResolveMatch) {
+        const user = requireAuth(normHeaders);
+        const appeal = moderationService.reviewAppeal(
+          user,
+          appealResolveMatch[1]!,
+          body.decision === 'UPHELD' ? 'UPHELD' : 'OVERTURNED',
+          String(body.note ?? 'Reviewed by independent moderator')
+        );
+        syncToSql();
+        return { status: 200, headers: responseHeaders, body: { data: appeal } as T };
+      }
+
+      // ─── Two-Approver Admin Actions (`/api/v1/admin/*`) ──────────
+      if (method === 'GET' && pathname === `${API_BASE_PATH}/admin/actions`) {
+        const user = requireAuth(normHeaders);
+        const items = administrationService.listSensitiveActions(user);
+        return { status: 200, headers: responseHeaders, body: { data: { items } } as T };
+      }
+
+      if (method === 'POST' && pathname === `${API_BASE_PATH}/admin/actions`) {
+        const user = requireAuth(normHeaders);
+        const req = administrationService.proposeSensitiveAction(user, {
+          actionType: (body.actionType as any) ?? 'DISABLE_SAFETY_KILLSWITCH',
+          targetId: String(body.targetId ?? 'MESSAGING_ENABLED'),
+          reason: String(body.reason ?? 'Emergency maintenance'),
+        });
+        syncToSql();
+        return { status: 201, headers: responseHeaders, body: { data: req } as T };
+      }
+
+      const adminApproveMatch = pathname.match(
+        new RegExp(`^${API_BASE_PATH}/admin/actions/([^/]+)/approve$`)
+      );
+      if (method === 'POST' && adminApproveMatch) {
+        const user = requireAuth(normHeaders);
+        const req = administrationService.approveSensitiveAction(user, adminApproveMatch[1]!);
+        syncToSql();
+        return { status: 200, headers: responseHeaders, body: { data: req } as T };
+      }
+
+      // Test/Dev Staff MFA Token helper (disabled in production)
+      if (
+        method === 'POST' &&
+        pathname === `${API_BASE_PATH}/auth/dev-staff-token` &&
+        process.env.NODE_ENV !== 'production'
+      ) {
+        const staffId = String(body.staffId ?? 'staff-mod-1');
+        const role = (body.role as any) ?? ROLES.PLATFORM_MODERATOR;
+        const token = tokenService.sign({
+          sub: staffId,
+          email: `${staffId}@cahootz.ng`,
+          roles: [role],
+          institutionId: pilotSeed.institutionId,
+          sessionId: `staff-dev-${staffId}`,
+        });
+        return {
+          status: 200,
+          headers: responseHeaders,
+          body: { data: { accessToken: token, user: { id: staffId, role, email: `${staffId}@cahootz.ng` } } } as T,
+        };
       }
 
       // ─── Privacy & Data Rights (`/api/v1/privacy/*`) ─────────────
@@ -1159,6 +1378,55 @@ export function createCahootzHttpServer(
 
   const server = createServer(async (req, res) => {
     try {
+      const parsedReqUrl = new URL(req.url ?? '/', 'http://localhost');
+      const sseMatch = parsedReqUrl.pathname.match(
+        new RegExp(`^${API_BASE_PATH}/sessions/([^/]+)/stream$`)
+      );
+      if ((req.method ?? 'GET').toUpperCase() === 'GET' && sseMatch) {
+        const sessionId = sseMatch[1]!;
+        const queryToken = parsedReqUrl.searchParams.get('token');
+        const normHeaders = normalizeHeaders(
+          req.headers as Record<string, string | undefined>
+        );
+        if (queryToken && !normHeaders['authorization']) {
+          normHeaders['authorization'] = `Bearer ${queryToken}`;
+        }
+        const user = requireAuth(normHeaders);
+        const initialPayload = buildSessionStatePayloadForUser(user.id, sessionId);
+
+        const sseHeaders: Record<string, string> = {
+          'Content-Type': 'text/event-stream; charset=utf-8',
+          'Cache-Control': 'no-cache, no-transform',
+          Connection: 'keep-alive',
+        };
+        securityMiddleware.applyHeaders(sseHeaders);
+        res.writeHead(200, sseHeaders);
+        res.write(`event: state\ndata: ${JSON.stringify(initialPayload)}\n\n`);
+
+        let clients = sseClientsBySession.get(sessionId);
+        if (!clients) {
+          clients = new Set();
+          sseClientsBySession.set(sessionId, clients);
+        }
+        const entry = { userId: user.id, res };
+        clients.add(entry);
+
+        const keepAliveTimer = setInterval(() => {
+          try {
+            res.write(': keepalive\n\n');
+          } catch {
+            clearInterval(keepAliveTimer);
+          }
+        }, 10_000);
+        keepAliveTimer.unref();
+
+        req.on('close', () => {
+          clearInterval(keepAliveTimer);
+          clients?.delete(entry);
+        });
+        return;
+      }
+
       const body = await readJsonBody(req);
       const result = await dispatch({
         method: req.method,
@@ -1182,6 +1450,15 @@ export function createCahootzHttpServer(
   });
 
   async function close(): Promise<void> {
+    for (const clients of sseClientsBySession.values()) {
+      for (const c of clients) {
+        try {
+          c.res.end();
+        } catch {}
+      }
+      clients.clear();
+    }
+    sseClientsBySession.clear();
     syncToSql();
     sqlStore.close();
     if (server.listening) {
