@@ -818,8 +818,14 @@ export function createCahootzHttpServer(
         }
       }
 
-      // ─── Health, Readiness & Observability Probes (`/healthz`, `/readyz`, `/metrics`, `/api/v1/observability/metrics`) ───
-      if (method === 'GET' && (pathname === '/healthz' || pathname === '/readyz')) {
+      // ─── Health, Readiness & Observability Probes (`/healthz`, `/readyz`, `/api/v1/health`, `/metrics`, `/api/v1/observability/metrics`) ───
+      if (
+        method === 'GET' &&
+        (pathname === '/healthz' ||
+          pathname === '/readyz' ||
+          pathname === `${API_BASE_PATH}/health` ||
+          pathname === `${API_BASE_PATH}/healthz`)
+      ) {
         return {
           status: 200,
           headers: responseHeaders,
