@@ -403,5 +403,18 @@ export class WalletService implements ReliabilityProvider {
     rec.updatedAt = now;
     return rec;
   }
+
+  listAllXpEntriesForPersistence(): XpLedgerEntry[] {
+    return [...this.xpLedger];
+  }
+
+  hydrateFromSql(entries: XpLedgerEntry[]): void {
+    for (const e of entries) {
+      if (!this.xpByIdempotency.has(e.idempotencyKey)) {
+        this.xpLedger.push(e);
+        this.xpByIdempotency.set(e.idempotencyKey, e);
+      }
+    }
+  }
 }
 

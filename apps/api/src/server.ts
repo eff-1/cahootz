@@ -3,7 +3,12 @@ import { URL } from 'node:url';
 import {
   API_BASE_PATH,
   BRAND_NAME,
+  BRAND_PROPOSITION,
+  BRAND_TAGLINE,
   ERROR_CODES,
+  PILOT_INSTITUTION,
+  RATE_LIMITS,
+  RELIABILITY_BANDS,
   uuidv7,
 } from '../../../packages/shared/src/index.ts';
 import { AppError } from './common/errors/app-error.ts';
@@ -11,6 +16,7 @@ import { DomainEventBus } from './common/events/domain-events.ts';
 import { type AuthenticatedUser } from './common/guards/jwt-auth.guard.ts';
 import { SecurityHeadersAndCsrfMiddleware } from './common/middleware/security-headers.middleware.ts';
 import { SnapshotBackupService } from './common/backup/snapshot-backup.service.ts';
+import { CahootzSqlStore } from './prisma/sql-store.ts';
 import { InMemoryEmailOutbox } from './modules/notifications/email.provider.ts';
 import { PasswordService } from './modules/identity/password.service.ts';
 import { TokenService } from './modules/identity/token.service.ts';
@@ -34,17 +40,27 @@ export interface HttpDispatchRequest {
   url: string;
   headers?: Record<string, string | undefined>;
   body?: Record<string, any>;
+  ip?: string;
 }
 
 export interface HttpDispatchResponse<T = any> {
   status: number;
   headers: Record<string, string>;
   body: T;
+  contentType?: string;
+}
+
+export interface CahootzServerOptions {
+  dbPath?: string;
+  jwtSecret?: string;
 }
 
 export interface CahootzApplicationContext {
   server: Server;
+  sqlStore: CahootzSqlStore;
   dispatch: <T = any>(req: HttpDispatchRequest) => Promise<HttpDispatchResponse<T>>;
+  syncToSql: () => void;
+  close: () => Promise<void>;
   eventBus: DomainEventBus;
   emailOutbox: InMemoryEmailOutbox;
   identityService: IdentityService;
@@ -84,31 +100,351 @@ async function readJsonBody(req: IncomingMessage): Promise<Record<string, any>> 
   }
 }
 
-function sendJson(
+function sendResponse(
   res: ServerResponse,
   statusCode: number,
   body: unknown,
-  headers: Record<string, string> = {}
+  headers: Record<string, string> = {},
+  contentType = 'application/json; charset=utf-8'
 ): void {
-  const payload = JSON.stringify(body);
+  const payload = typeof body === 'string' ? body : JSON.stringify(body);
   res.writeHead(statusCode, {
-    'Content-Type': 'application/json; charset=utf-8',
+    'Content-Type': contentType,
     'Content-Length': String(Buffer.byteLength(payload)),
     ...headers,
   });
   res.end(payload);
 }
 
-/**
- * Creates a complete, runnable HTTP server wiring all 12 modular-monolith
- * domain services, security headers, correlation IDs, JWT authentication, and
- * standard API error envelopes (`/api/v1/*`).
- */
-export function createCahootzHttpServer(): CahootzApplicationContext {
+function parseCookies(cookieHeader: string | undefined): Record<string, string> {
+  const out: Record<string, string> = {};
+  if (!cookieHeader) return out;
+  for (const part of cookieHeader.split(';')) {
+    const idx = part.indexOf('=');
+    if (idx > 0) {
+      const k = part.slice(0, idx).trim();
+      const v = part.slice(idx + 1).trim();
+      out[k] = v;
+    }
+  }
+  return out;
+}
+
+function formatRefreshCookie(token: string, maxAgeSeconds = 7 * 24 * 60 * 60): string {
+  return `refresh_token=${token}; HttpOnly; Secure; SameSite=Strict; Path=${API_BASE_PATH}/auth; Max-Age=${maxAgeSeconds}`;
+}
+
+function renderAccessibleWebPage(pathname: string): string | null {
+  const pages: Record<string, { title: string; heading: string; content: string }> = {
+    '/': {
+      title: `${BRAND_NAME} — ${BRAND_TAGLINE}`,
+      heading: `${BRAND_NAME} Student Study Dashboard`,
+      content: `
+        <p class="subtitle">${BRAND_PROPOSITION}</p>
+        <section aria-labelledby="stats-heading" class="grid">
+          <h2 id="stats-heading" class="sr-only">Study Commitment Metrics</h2>
+          <div class="card">
+            <span class="label">Current Streak</span>
+            <strong class="metric">4 Days</strong>
+            <span class="hint">1 freeze available per 14 days (Africa/Lagos)</span>
+          </div>
+          <div class="card">
+            <span class="label">Reliability Band</span>
+            <strong class="metric">${RELIABILITY_BANDS.VERY_RELIABLE}</strong>
+            <span class="hint">Technical disconnects never penalize your score</span>
+          </div>
+          <div class="card">
+            <span class="label">Total XP (Append-Only Ledger)</span>
+            <strong class="metric">350 XP</strong>
+            <span class="hint">Non-monetary academic commitment record</span>
+          </div>
+        </section>
+        <div class="actions">
+          <a href="/discover" class="btn-primary">Find a Study Partner</a>
+          <a href="/sessions/demo" class="btn-secondary">Enter Study Together Room</a>
+        </div>
+      `,
+    },
+    '/onboarding': {
+      title: `Academic Onboarding — ${BRAND_NAME}`,
+      heading: 'Complete Your Academic Profile',
+      content: `
+        <p class="subtitle">Self-declared academic profile gives immediate access to Study Together. Optional institutional email OTP adds a verified badge.</p>
+        <form aria-label="Academic Onboarding Form" class="card form-stack" action="/discover" method="get">
+          <div class="field">
+            <label for="institution-select">University / Institution</label>
+            <select id="institution-select" name="institution">
+              <option value="${PILOT_INSTITUTION.code}">${PILOT_INSTITUTION.name}</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="display-name">Display Name</label>
+            <input id="display-name" name="displayName" type="text" required value="Tunde Bakare" />
+          </div>
+          <div class="field">
+            <label for="inst-email">Institutional Email (Optional 6-Digit OTP)</label>
+            <input id="inst-email" name="institutionalEmail" type="email" placeholder="tunde@student.sample-university.example" />
+          </div>
+          <button type="submit" class="btn-primary">Save Profile &amp; Continue</button>
+        </form>
+      `,
+    },
+    '/discover': {
+      title: `Discover Study Partners — ${BRAND_NAME}`,
+      heading: 'Discover Study Partners in Your Institution',
+      content: `
+        <p class="subtitle">Matched transparently by shared courses, academic level, availability, and Study Now signal.</p>
+        <section aria-labelledby="matches-heading" class="stack">
+          <h2 id="matches-heading">Top Course Matches (CSC 301 &amp; CSC 305)</h2>
+          <article class="card partner-row">
+            <div>
+              <h3>Zainab M. <span class="badge">Very Reliable</span> <span class="badge-now">Looking to Study Now</span></h3>
+              <p>2 shared courses (CSC 301, CSC 305) · 300 Level · Goal: Past Questions</p>
+            </div>
+            <a href="/sessions/demo" class="btn-primary">Invite to Study</a>
+          </article>
+        </section>
+      `,
+    },
+    '/sessions/demo': {
+      title: `Study Together Focus Room — ${BRAND_NAME}`,
+      heading: 'CSC 301 — Operating Systems Focus Session',
+      content: `
+        <p class="subtitle">Partner: Zainab M. (Present &amp; Focused) · No camera or screen surveillance.</p>
+        <section aria-labelledby="timer-heading" class="card timer-box">
+          <h2 id="timer-heading">Server-Synchronized Focus Timer</h2>
+          <div role="timer" aria-label="Remaining focus time 25 minutes 00 seconds" class="timer-digits">25:00</div>
+          <p class="hint">5-minute reconnect grace active — power cuts or mobile data drops are never penalized.</p>
+          <div class="actions">
+            <button type="button" class="btn-primary">Confirm Check-In / Ping</button>
+            <button type="button" class="btn-secondary">Pause Timer</button>
+            <button type="button" class="btn-outline">Consented Emergency Exit</button>
+          </div>
+        </section>
+      `,
+    },
+    '/communities': {
+      title: `Course Communities — ${BRAND_NAME}`,
+      heading: 'Course Communities &amp; Q&amp;A',
+      content: `
+        <p class="subtitle">Auto-joined from your enrolled courses. Every post requires a course tag.</p>
+        <article class="card">
+          <h2><span class="badge">CSC 301</span> How does Peterson's solution guarantee mutual exclusion?</h2>
+          <p>Accepted Answer: The flag array expresses intent to enter the critical section while turn breaks ties deterministically.</p>
+        </article>
+      `,
+    },
+    '/messages': {
+      title: `Study Partner Messages — ${BRAND_NAME}`,
+      heading: '1:1 Academic Direct Messages',
+      content: `
+        <p class="subtitle">Available only between confirmed study partners or shared-course adults. File uploads are disabled in MVP.</p>
+        <section aria-labelledby="chat-heading" class="card form-stack">
+          <h2 id="chat-heading">Conversation with Zainab M.</h2>
+          <p><strong>Zainab M.:</strong> Ready for our CSC 301 past-question review?</p>
+          <div class="field">
+            <label for="chat-message-input">Your Message</label>
+            <input id="chat-message-input" type="text" placeholder="Write a message..." />
+          </div>
+          <div class="actions">
+            <button type="button" class="btn-primary">Send Message</button>
+            <button type="button" class="btn-outline">One-Tap Report</button>
+          </div>
+        </section>
+      `,
+    },
+    '/settings/privacy': {
+      title: `Privacy & Data Rights (NDPA 2023) — ${BRAND_NAME}`,
+      heading: 'Privacy, Security &amp; NDPA 2023 Data Rights',
+      content: `
+        <p class="subtitle">Manage profile discoverability, active device sessions, JSON data portability export, and 30-day account deletion.</p>
+        <section aria-labelledby="rights-heading" class="card stack">
+          <h2 id="rights-heading">Self-Service Controls</h2>
+          <div class="actions">
+            <button type="button" class="btn-primary">Export My Data (JSON)</button>
+            <button type="button" class="btn-secondary">Sign Out Everywhere</button>
+            <button type="button" class="btn-outline">Request Account Deletion (30d Grace)</button>
+          </div>
+        </section>
+      `,
+    },
+  };
+
+  const page = pages[pathname];
+  if (!page) return null;
+
+  return `<!DOCTYPE html>
+<html lang="en-NG">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>${page.title}</title>
+  <style>
+    :root {
+      --navy: #0B1B3A;
+      --blue: #1D4ED8;
+      --bg: #F7F6F2;
+      --surface: #FFFFFF;
+      --text: #0B1B3A;
+      --muted: #334155;
+      --green: #065F46;
+      --green-bg: #D1FAE5;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.5;
+    }
+    .skip-link {
+      position: absolute;
+      left: -9999px;
+      top: 8px;
+      background: var(--navy);
+      color: #FFFFFF;
+      padding: 12px 16px;
+      border-radius: 8px;
+      font-weight: 700;
+      text-decoration: none;
+    }
+    .skip-link:focus { left: 8px; z-index: 1000; }
+    .sr-only {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
+    nav {
+      background: var(--navy);
+      color: #FFFFFF;
+      padding: 12px 16px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      align-items: center;
+      justify-content: space-between;
+    }
+    nav a {
+      color: #FFFFFF;
+      text-decoration: none;
+      font-weight: 600;
+      min-height: 44px;
+      display: inline-flex;
+      align-items: center;
+      padding: 0 8px;
+    }
+    nav a:hover, nav a:focus { text-decoration: underline; }
+    main {
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 20px 16px 48px;
+    }
+    h1 { font-size: 1.6rem; margin-top: 0; }
+    h2 { font-size: 1.25rem; }
+    .subtitle { color: var(--muted); margin-bottom: 20px; }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+    .stack { display: flex; flex-direction: column; gap: 16px; }
+    .card {
+      background: var(--surface);
+      border: 1px solid #CBD5E1;
+      border-radius: 12px;
+      padding: 20px;
+    }
+    .label { display: block; font-size: 0.85rem; color: var(--muted); font-weight: 600; }
+    .metric { display: block; font-size: 1.75rem; margin: 4px 0; color: var(--navy); }
+    .hint { display: block; font-size: 0.82rem; color: var(--muted); }
+    .actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 16px; }
+    .btn-primary, .btn-secondary, .btn-outline {
+      min-height: 44px;
+      min-width: 44px;
+      padding: 10px 18px;
+      border-radius: 8px;
+      font-weight: 700;
+      font-size: 0.95rem;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      text-decoration: none;
+    }
+    .btn-primary { background: var(--blue); color: #FFFFFF; border: 2px solid var(--blue); }
+    .btn-secondary { background: var(--navy); color: #FFFFFF; border: 2px solid var(--navy); }
+    .btn-outline { background: #FFFFFF; color: var(--navy); border: 2px solid var(--navy); }
+    .form-stack { display: flex; flex-direction: column; gap: 16px; }
+    .field { display: flex; flex-direction: column; gap: 6px; }
+    label { font-weight: 700; font-size: 0.95rem; }
+    input, select {
+      min-height: 44px;
+      padding: 8px 12px;
+      border: 1px solid #64748B;
+      border-radius: 8px;
+      font-size: 1rem;
+      color: var(--text);
+      background: #FFFFFF;
+    }
+    .badge {
+      background: var(--green-bg);
+      color: var(--green);
+      font-size: 0.8rem;
+      padding: 2px 8px;
+      border-radius: 999px;
+    }
+    .badge-now {
+      background: #DBEAFE;
+      color: #1E3A8A;
+      font-size: 0.8rem;
+      padding: 2px 8px;
+      border-radius: 999px;
+    }
+    .timer-digits {
+      font-size: 3.5rem;
+      font-weight: 800;
+      font-variant-numeric: tabular-nums;
+      margin: 12px 0;
+    }
+  </style>
+</head>
+<body>
+  <a href="#main-content" class="skip-link">Skip to main content</a>
+  <nav aria-label="Primary Navigation">
+    <a href="/">${BRAND_NAME}</a>
+    <div>
+      <a href="/onboarding">Onboarding</a>
+      <a href="/discover">Discover</a>
+      <a href="/sessions/demo">Study Room</a>
+      <a href="/communities">Communities</a>
+      <a href="/messages">Messages</a>
+      <a href="/settings/privacy">Privacy</a>
+    </div>
+  </nav>
+  <main id="main-content">
+    <h1>${page.heading}</h1>
+    ${page.content}
+  </main>
+</body>
+</html>`;
+}
+
+export function createCahootzHttpServer(
+  options: CahootzServerOptions = {}
+): CahootzApplicationContext {
+  const sqlStore = new CahootzSqlStore(options.dbPath ?? ':memory:');
   const eventBus = new DomainEventBus();
   const emailOutbox = new InMemoryEmailOutbox();
   const passwordService = new PasswordService();
-  const tokenService = new TokenService();
+  const tokenService = new TokenService(options.jwtSecret);
   const totpService = new TotpService();
 
   const identityService = new IdentityService(
@@ -165,6 +501,243 @@ export function createCahootzHttpServer(): CahootzApplicationContext {
 
   const pilotSeed = seedPilotInstitution(institutionsService);
 
+  // Hydrate state from SQLite database if existing rows exist on disk
+  function hydrateFromSql(): void {
+    const snap = sqlStore.exportSnapshot();
+    identityService.hydrateFromSql(
+      snap.tables.users.map((r: any) => ({
+        id: r.id,
+        email: r.email,
+        passwordHash: r.password_hash,
+        dateOfBirth: new Date(r.date_of_birth),
+        isVerified: Boolean(r.is_verified),
+        isStaff: Boolean(r.is_staff),
+        totpSecret: r.totp_secret,
+        totpEnabled: Boolean(r.totp_enabled),
+        roles: JSON.parse(r.roles_json),
+        profile: JSON.parse(r.profile_json),
+        createdAt: new Date(r.created_at),
+        updatedAt: new Date(r.updated_at),
+        deletedAt: r.deleted_at ? new Date(r.deleted_at) : null,
+      })),
+      snap.tables.auth_sessions.map((s: any) => ({
+        id: s.id,
+        userId: s.user_id,
+        refreshTokenHash: s.refresh_token_hash,
+        deviceName: s.device_name,
+        ipAddress: s.ip_address,
+        userAgent: s.user_agent,
+        isRevoked: Boolean(s.is_revoked),
+        expiresAt: new Date(s.expires_at),
+        createdAt: new Date(s.created_at),
+        updatedAt: new Date(s.updated_at),
+      }))
+    );
+
+    studentsService.hydrateFromSql(
+      snap.tables.student_profiles.map((p: any) => ({
+        userId: p.user_id,
+        institutionId: p.institution_id,
+        orgUnitId: p.org_unit_id,
+        programmeId: p.programme_id,
+        levelId: p.level_id,
+        displayName: p.display_name,
+        bio: p.bio,
+        studyGoals: JSON.parse(p.study_goals_json),
+        preferredModes: JSON.parse(p.preferred_modes_json),
+        availabilityJson: JSON.parse(p.availability_json),
+        visibility: p.visibility,
+        isDiscoverable: Boolean(p.is_discoverable),
+        verificationStatus: p.verification_status,
+        institutionalEmail: p.institutional_email,
+        onboardingCompletedAt: p.onboarding_completed_at
+          ? new Date(p.onboarding_completed_at)
+          : null,
+        createdAt: new Date(p.created_at),
+        updatedAt: new Date(p.updated_at),
+      })),
+      snap.tables.student_enrolments.map((e: any) => ({
+        id: e.id,
+        userId: e.user_id,
+        courseId: e.course_id,
+        termId: e.term_id,
+        createdAt: new Date(e.created_at),
+      }))
+    );
+
+    discoveryService.hydrateFromSql(
+      snap.tables.study_invitations.map((i: any) => ({
+        id: i.id,
+        institutionId: i.institution_id,
+        senderId: i.sender_id,
+        recipientId: i.recipient_id,
+        courseId: i.course_id,
+        goal: i.goal,
+        proposedStartAt: new Date(i.proposed_start_at),
+        durationMinutes: Number(i.duration_minutes),
+        mode: i.mode,
+        status: i.status,
+        idempotencyKey: i.idempotency_key,
+        respondedAt: i.responded_at ? new Date(i.responded_at) : null,
+        sessionId: i.session_id,
+        createdAt: new Date(i.created_at),
+        expiresAt: new Date(i.expires_at),
+      }))
+    );
+
+    studySessionsService.hydrateFromSql(
+      snap.tables.study_sessions.map((s: any) => ({
+        id: s.id,
+        institutionId: s.institution_id,
+        courseId: s.course_id,
+        hostId: s.host_id,
+        partnerId: s.partner_id,
+        goal: s.goal,
+        mode: s.mode,
+        plannedDurationMinutes: Number(s.planned_duration_minutes),
+        pingResponseWindowSeconds: Number(s.ping_response_window_seconds),
+        state: s.state,
+        version: Number(s.version),
+        scheduledStartAt: new Date(s.scheduled_start_at),
+        startedAt: s.started_at ? new Date(s.started_at) : null,
+        pausedAt: s.paused_at ? new Date(s.paused_at) : null,
+        pausedDurationSeconds: Number(s.paused_duration_seconds),
+        endedAt: s.ended_at ? new Date(s.ended_at) : null,
+        idempotencyKey: s.idempotency_key,
+        participants: JSON.parse(s.participants_json),
+        createdAt: new Date(s.created_at),
+        updatedAt: new Date(s.updated_at),
+      })),
+      snap.tables.session_events.map((ev: any) => ({
+        id: ev.id,
+        sessionId: ev.session_id,
+        seq: Number(ev.seq),
+        actorId: ev.actor_id,
+        eventType: ev.event_type,
+        fromState: ev.from_state,
+        toState: ev.to_state,
+        clientEventId: ev.client_event_id,
+        clientSeq: ev.client_seq !== null ? Number(ev.client_seq) : null,
+        clientTimestamp: ev.client_timestamp ? new Date(ev.client_timestamp) : null,
+        serverTimestamp: new Date(ev.server_timestamp),
+        payload: JSON.parse(ev.payload_json),
+      }))
+    );
+
+    walletService.hydrateFromSql(
+      snap.tables.xp_ledger.map((x: any) => ({
+        id: x.id,
+        userId: x.user_id,
+        sessionId: x.session_id,
+        partnerId: x.partner_id,
+        reason: x.reason,
+        amount: Number(x.amount),
+        idempotencyKey: x.idempotency_key,
+        lagosDate: x.lagos_date,
+        createdAt: new Date(x.created_at),
+      }))
+    );
+
+    messagingService.hydrateFromSql(
+      snap.tables.direct_messages.map((m: any) => ({
+        id: m.id,
+        conversationKey: m.conversation_key,
+        seq: Number(m.seq),
+        senderId: m.sender_id,
+        recipientId: m.recipient_id,
+        body: m.body,
+        clientMessageId: m.client_message_id,
+        isRemovedByModeration: Boolean(m.is_removed_by_moderation),
+        createdAt: new Date(m.created_at),
+      }))
+    );
+
+    moderationService.hydrateFromSql(
+      snap.tables.audit_log.map((a: any) => ({
+        id: a.id,
+        seq: Number(a.seq),
+        actorId: a.actor_id,
+        actorRole: a.actor_role,
+        action: a.action,
+        targetType: a.target_type,
+        targetId: a.target_id,
+        metadata: JSON.parse(a.metadata_json),
+        createdAt: new Date(a.created_at),
+      }))
+    );
+
+    consentPrivacyService.hydrateFromSql(
+      snap.tables.consent_log.map((c: any) => ({
+        id: c.id,
+        userId: c.user_id,
+        purpose: c.purpose,
+        policyVersion: c.policy_version,
+        granted: Boolean(c.granted),
+        ipAddress: c.ip_address,
+        userAgent: c.user_agent,
+        timestamp: new Date(c.timestamp),
+      }))
+    );
+  }
+
+  function syncToSql(): void {
+    for (const u of identityService.listAllUsersForPersistence()) {
+      sqlStore.saveUser(u);
+    }
+    for (const s of identityService.listAllSessionsForPersistence()) {
+      sqlStore.saveAuthSession(s);
+    }
+    for (const p of studentsService.listAllProfilesForPersistence()) {
+      sqlStore.saveStudentProfile(p);
+    }
+    for (const e of studentsService.listAllEnrolmentsForPersistence()) {
+      sqlStore.saveEnrolment(e);
+    }
+    for (const inv of discoveryService.listAllInvitationsForPersistence()) {
+      sqlStore.saveInvitation(inv);
+    }
+    for (const sess of studySessionsService.listAllSessionsForPersistence()) {
+      sqlStore.saveStudySession(sess);
+      const evs = studySessionsService.getSessionEvents(sess.hostId, sess.id);
+      for (const ev of evs) {
+        sqlStore.appendSessionEvent(ev);
+      }
+    }
+    for (const xp of walletService.listAllXpEntriesForPersistence()) {
+      sqlStore.appendXpLedger(xp);
+    }
+    for (const msg of messagingService.listAllMessagesForPersistence()) {
+      sqlStore.saveDirectMessage(msg);
+    }
+    for (const aud of moderationService.listAllAuditLogsForPersistence()) {
+      sqlStore.appendAuditLog(aud);
+    }
+    for (const con of consentPrivacyService.listAllConsentsForPersistence()) {
+      sqlStore.appendConsentLog(con);
+    }
+  }
+
+  hydrateFromSql();
+
+  // Auth rate limit counters
+  const loginAttemptsByEmail = new Map<string, number[]>();
+  const registerAttemptsByIp = new Map<string, number[]>();
+
+  function checkRateLimit(
+    bucketMap: Map<string, number[]>,
+    key: string,
+    maxCount: number,
+    windowMs: number
+  ): void {
+    const nowMs = Date.now();
+    const recent = (bucketMap.get(key) ?? []).filter((ts) => nowMs - ts < windowMs);
+    if (recent.length >= maxCount) {
+      throw AppError.rateLimited('Too many attempts. Please try again later.');
+    }
+    recent.push(nowMs);
+    bucketMap.set(key, recent);
+  }
+
   function normalizeHeaders(
     headers: Record<string, string | string[] | undefined> = {}
   ): Record<string, string> {
@@ -179,22 +752,32 @@ export function createCahootzHttpServer(): CahootzApplicationContext {
     return out;
   }
 
-  function requireAuth(headers: Record<string, string>): AuthenticatedUser {
+  function requireAuth(headers: Record<string, string>): AuthenticatedUser & { sessionId?: string } {
     const authHeader = headers['authorization'];
     if (typeof authHeader !== 'string' || !authHeader.startsWith('Bearer ')) {
       throw AppError.unauthenticated('Authorization Bearer token required.');
     }
     const token = authHeader.slice(7).trim();
     const payload = tokenService.verify(token);
+
+    // Server-side revocation check: if session was logged out or revoked, reject access token
+    if (payload.sessionId && !identityService.isSessionActive(payload.sessionId)) {
+      throw AppError.unauthenticated('Session has been revoked.');
+    }
+
     const info = identityService.getPublicInfo(payload.sub);
+    if (!info) {
+      throw AppError.unauthenticated('Account not found or deleted.');
+    }
     const profile = studentsService.findProfile(payload.sub);
     return {
       id: payload.sub,
       email: payload.email,
       role: (payload.roles[0] as any) ?? 'STUDENT',
       institutionId: profile?.institutionId ?? payload.institutionId ?? null,
-      isMinor: info?.isRestricted ?? false,
+      isMinor: info.isRestricted,
       mfaVerified: true,
+      sessionId: payload.sessionId,
     };
   }
 
@@ -214,10 +797,27 @@ export function createCahootzHttpServer(): CahootzApplicationContext {
 
     try {
       const method = (req.method ?? 'GET').toUpperCase();
-      const parsedUrl = new URL(req.url ?? '/', 'http://localhost');
+      const rawUrl = req.url ?? (req as { path?: string }).path ?? '/';
+      const parsedUrl = new URL(rawUrl, 'http://localhost');
       const pathname = parsedUrl.pathname;
       const body = req.body ?? {};
-      const idempotencyKey = normHeaders['idempotency-key']?.trim();
+      const idempotencyKey =
+        normHeaders['idempotency-key']?.trim() ||
+        (typeof body.idempotencyKey === 'string' ? body.idempotencyKey.trim() : undefined);
+      const clientIp = req.ip ?? normHeaders['x-forwarded-for'] ?? '127.0.0.1';
+
+      // ─── Accessible Web App Routes (`GET /`, `/onboarding`, `/discover`, etc.) ───
+      if (method === 'GET' && !pathname.startsWith('/api/') && pathname !== '/healthz' && pathname !== '/readyz') {
+        const html = renderAccessibleWebPage(pathname);
+        if (html) {
+          return {
+            status: 200,
+            headers: responseHeaders,
+            body: html as unknown as T,
+            contentType: 'text/html; charset=utf-8',
+          };
+        }
+      }
 
       // ─── Health & Readiness Probes ───────────────────────────────
       if (method === 'GET' && (pathname === '/healthz' || pathname === '/readyz')) {
@@ -235,26 +835,88 @@ export function createCahootzHttpServer(): CahootzApplicationContext {
 
       // ─── Auth Routes (`/api/v1/auth/*`) ──────────────────────────
       if (method === 'POST' && pathname === `${API_BASE_PATH}/auth/register`) {
+        checkRateLimit(
+          registerAttemptsByIp,
+          clientIp,
+          RATE_LIMITS.REGISTER_ATTEMPTS_PER_HOUR,
+          60 * 60 * 1000
+        );
         const result = await identityService.register({
           email: String(body.email ?? ''),
           password: String(body.password ?? ''),
           dateOfBirth: String(body.dateOfBirth ?? ''),
         });
+        consentPrivacyService.recordConsent(result.userId, {
+          purpose: 'PRIVACY_NOTICE_ACK',
+          policyVersion: String(body.privacyNoticeVersion ?? 'v1.0-draft'),
+          granted: true,
+          ipAddress: clientIp,
+        });
+        syncToSql();
         return { status: 201, headers: responseHeaders, body: { data: result } as T };
       }
 
       if (method === 'POST' && pathname === `${API_BASE_PATH}/auth/login`) {
+        const emailKey = String(body.email ?? '').trim().toLowerCase() || clientIp;
+        checkRateLimit(
+          loginAttemptsByEmail,
+          emailKey,
+          RATE_LIMITS.LOGIN_ATTEMPTS_PER_15MIN,
+          15 * 60 * 1000
+        );
         const result = await identityService.login({
           email: String(body.email ?? ''),
           password: String(body.password ?? ''),
           totpCode: body.totpCode ? String(body.totpCode) : undefined,
         });
+        if (result.refreshToken) {
+          responseHeaders['Set-Cookie'] = formatRefreshCookie(result.refreshToken);
+        }
+        syncToSql();
         return { status: 200, headers: responseHeaders, body: { data: result } as T };
       }
 
       if (method === 'POST' && pathname === `${API_BASE_PATH}/auth/refresh`) {
-        const result = await identityService.refresh(String(body.refreshToken ?? ''));
+        const cookies = parseCookies(normHeaders['cookie']);
+        const refreshToken = cookies['refresh_token'] || String(body.refreshToken ?? '');
+        const result = await identityService.refresh(refreshToken);
+        responseHeaders['Set-Cookie'] = formatRefreshCookie(result.refreshToken);
+        syncToSql();
         return { status: 200, headers: responseHeaders, body: { data: result } as T };
+      }
+
+      if (method === 'POST' && pathname === `${API_BASE_PATH}/auth/logout`) {
+        const user = requireAuth(normHeaders);
+        if (user.sessionId) {
+          await identityService.logout(user.sessionId);
+        }
+        responseHeaders['Set-Cookie'] = formatRefreshCookie('', 0);
+        syncToSql();
+        return { status: 200, headers: responseHeaders, body: { data: { success: true } } as T };
+      }
+
+      if (
+        method === 'POST' &&
+        (pathname === `${API_BASE_PATH}/auth/password/reset-request` ||
+          pathname === `${API_BASE_PATH}/auth/recover`)
+      ) {
+        const result = await identityService.requestPasswordReset(String(body.email ?? ''));
+        return {
+          status: 202,
+          headers: responseHeaders,
+          body: { data: { accepted: result.accepted, message: result.message } } as T,
+        };
+      }
+
+      if (method === 'GET' && pathname === `${API_BASE_PATH}/wallet`) {
+        const user = requireAuth(normHeaders);
+        const xpBalance = walletService.getXpBalance(user.id);
+        const entries = walletService.listXpLedger(user.id);
+        return {
+          status: 200,
+          headers: responseHeaders,
+          body: { data: { xpBalance, entries } } as T,
+        };
       }
 
       // ─── Institutions & Catalogue (`/api/v1/institutions/*`) ─────
@@ -301,6 +963,7 @@ export function createCahootzHttpServer(): CahootzApplicationContext {
           visibility: body.visibility,
           isDiscoverable: body.isDiscoverable,
         });
+        syncToSql();
         return { status: 200, headers: responseHeaders, body: { data: result } as T };
       }
 
@@ -345,11 +1008,36 @@ export function createCahootzHttpServer(): CahootzApplicationContext {
         const invitation = await discoveryService.sendInvitation(user.id, {
           recipientId: String(body.recipientId ?? ''),
           courseId: String(body.courseId ?? ''),
-          goal: String(body.goal ?? ''),
-          durationMinutes: body.durationMinutes,
+          goal: String(body.goal ?? body.proposedGoal ?? ''),
+          durationMinutes: body.durationMinutes ?? body.proposedDurationMinutes,
           idempotencyKey,
         });
+        syncToSql();
         return { status: 201, headers: responseHeaders, body: { data: invitation } as T };
+      }
+
+      const invRespondMatch = pathname.match(
+        new RegExp(`^${API_BASE_PATH}/discovery/invitations/([^/]+)/respond$`)
+      );
+      if (method === 'POST' && invRespondMatch) {
+        const user = requireAuth(normHeaders);
+        const decision = body.accept === false || body.decision === 'DECLINE' ? 'DECLINE' : 'ACCEPT';
+        const inv = await discoveryService.respondToInvitation(
+          user.id,
+          invRespondMatch[1]!,
+          decision
+        );
+        syncToSql();
+        return { status: 200, headers: responseHeaders, body: { data: inv } as T };
+      }
+
+      const invGetMatch = pathname.match(
+        new RegExp(`^${API_BASE_PATH}/discovery/invitations/([^/]+)$`)
+      );
+      if (method === 'GET' && invGetMatch) {
+        const user = requireAuth(normHeaders);
+        const inv = discoveryService.getInvitationForActor(user.id, invGetMatch[1]!);
+        return { status: 200, headers: responseHeaders, body: { data: inv } as T };
       }
 
       // ─── Study Together Sessions (`/api/v1/sessions/*`) ──────────
@@ -362,7 +1050,20 @@ export function createCahootzHttpServer(): CahootzApplicationContext {
           plannedDurationMinutes: body.plannedDurationMinutes,
           idempotencyKey,
         });
+        syncToSql();
         return { status: 201, headers: responseHeaders, body: { data: session } as T };
+      }
+
+      const sessionGetMatch = pathname.match(
+        new RegExp(`^${API_BASE_PATH}/sessions/([^/]+)$`)
+      );
+      if (method === 'GET' && sessionGetMatch) {
+        const user = requireAuth(normHeaders);
+        const session = studySessionsService.getSessionForParticipant(
+          user.id,
+          sessionGetMatch[1]!
+        );
+        return { status: 200, headers: responseHeaders, body: { data: session } as T };
       }
 
       const sessionCheckInMatch = pathname.match(
@@ -375,13 +1076,45 @@ export function createCahootzHttpServer(): CahootzApplicationContext {
           clientEventId: body.clientEventId,
           expectedVersion: body.expectedVersion,
         });
+        syncToSql();
         return { status: 200, headers: responseHeaders, body: { data: session } as T };
+      }
+
+      // ─── Direct Messages (`/api/v1/messages/*`) ──────────────────
+      if (method === 'POST' && pathname === `${API_BASE_PATH}/messages`) {
+        const user = requireAuth(normHeaders);
+        const msg = await messagingService.sendMessage(user.id, {
+          recipientId: String(body.recipientId ?? ''),
+          body: String(body.body ?? ''),
+          clientMessageId: String(body.clientMessageId ?? uuidv7()),
+        });
+        syncToSql();
+        return { status: 201, headers: responseHeaders, body: { data: msg } as T };
+      }
+
+      const msgGetMatch = pathname.match(new RegExp(`^${API_BASE_PATH}/messages/([^/]+)$`));
+      if (method === 'GET' && msgGetMatch) {
+        const user = requireAuth(normHeaders);
+        const msg = messagingService.getMessageByIdForActor(user.id, msgGetMatch[1]!);
+        return { status: 200, headers: responseHeaders, body: { data: msg } as T };
       }
 
       // ─── Privacy & Data Rights (`/api/v1/privacy/*`) ─────────────
       if (method === 'GET' && pathname === `${API_BASE_PATH}/privacy/export`) {
         const user = requireAuth(normHeaders);
         const exported = consentPrivacyService.exportUserData(user.id);
+        return { status: 200, headers: responseHeaders, body: { data: exported } as T };
+      }
+
+      const exportUserMatch = pathname.match(
+        new RegExp(`^${API_BASE_PATH}/privacy/export/([^/]+)$`)
+      );
+      if (method === 'GET' && exportUserMatch) {
+        const user = requireAuth(normHeaders);
+        const exported = consentPrivacyService.exportUserDataForActor(
+          user.id,
+          exportUserMatch[1]!
+        );
         return { status: 200, headers: responseHeaders, body: { data: exported } as T };
       }
 
@@ -434,24 +1167,38 @@ export function createCahootzHttpServer(): CahootzApplicationContext {
         url: req.url ?? '/',
         headers: req.headers as Record<string, string | undefined>,
         body,
+        ip: req.socket.remoteAddress ?? '127.0.0.1',
       });
-      sendJson(res, result.status, result.body, result.headers);
+      sendResponse(res, result.status, result.body, result.headers, result.contentType);
     } catch (err: unknown) {
       if (err instanceof AppError) {
-        sendJson(res, err.httpStatus, {
+        sendResponse(res, err.httpStatus, {
           error: { code: err.code, message: err.message },
         });
       } else {
-        sendJson(res, 500, {
+        sendResponse(res, 500, {
           error: { code: ERROR_CODES.INTERNAL_ERROR, message: 'Internal server error' },
         });
       }
     }
   });
 
+  async function close(): Promise<void> {
+    syncToSql();
+    sqlStore.close();
+    if (server.listening) {
+      await new Promise<void>((resolve, reject) => {
+        server.close((err) => (err ? reject(err) : resolve()));
+      });
+    }
+  }
+
   return {
     server,
+    sqlStore,
     dispatch,
+    syncToSql,
+    close,
     eventBus,
     emailOutbox,
     identityService,

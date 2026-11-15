@@ -485,4 +485,37 @@ export class IdentityService {
 
     return { success: true, message: 'Two-factor authentication successfully disabled' };
   }
+
+  isSessionActive(sessionId: string, now: Date = new Date()): boolean {
+    const s = this.sessions.get(sessionId);
+    if (!s || s.isRevoked || s.expiresAt <= now) {
+      return false;
+    }
+    return true;
+  }
+
+  getUserEntityForPersistence(userId: string): UserEntity | undefined {
+    return this.users.get(userId);
+  }
+
+  listAllUsersForPersistence(): UserEntity[] {
+    return Array.from(this.users.values());
+  }
+
+  listAllSessionsForPersistence(): SessionEntity[] {
+    return Array.from(this.sessions.values());
+  }
+
+  hydrateFromSql(users: UserEntity[], sessions: SessionEntity[]): void {
+    for (const u of users) {
+      this.users.set(u.id, u);
+      this.usersByEmail.set(u.email, u.id);
+    }
+    for (const s of sessions) {
+      this.sessions.set(s.id, s);
+      if (!s.isRevoked) {
+        this.sessionsByTokenHash.set(s.refreshTokenHash, s.id);
+      }
+    }
+  }
 }

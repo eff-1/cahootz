@@ -170,6 +170,7 @@ export class InstitutionsService {
   // ─── Institutions ────────────────────────────────────────────────
 
   createInstitution(data: {
+    id?: string;
     name: string;
     code: string;
     countryCode?: string;
@@ -186,7 +187,7 @@ export class InstitutionsService {
       }
     }
     const entity: InstitutionEntity = {
-      id: uuidv7(),
+      id: data.id || uuidv7(),
       name: data.name.trim(),
       code,
       countryCode,
@@ -409,6 +410,7 @@ export class InstitutionsService {
   // ─── Courses and offerings ───────────────────────────────────────
 
   createCourse(data: {
+    id?: string;
     institutionId: string;
     orgUnitId?: string | null;
     code: string;
@@ -431,7 +433,7 @@ export class InstitutionsService {
     }
     const provenance = data.provenance || 'CURATED';
     const entity: CourseEntity = {
-      id: uuidv7(),
+      id: data.id || uuidv7(),
       institutionId: data.institutionId,
       orgUnitId: data.orgUnitId || null,
       code,

@@ -51,3 +51,4 @@ describe('Background Queue Worker — Idempotency, Retries & Dead-Letter Queue',
     assert.equal(worker.listDeadLetterQueue()[0]!.lastError, 'SMTP connection timeout');
   });
 });
+

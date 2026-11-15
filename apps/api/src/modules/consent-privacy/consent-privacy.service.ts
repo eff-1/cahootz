@@ -96,7 +96,19 @@ export class ConsentPrivacyService {
 
   /**
    * NDPA Data Portability / Right of Access: exports all personal data held for the user.
+   * Per-object check: `actorUserId` must equal `targetUserId` (prevents BOLA/IDOR).
    */
+  exportUserDataForActor(
+    actorUserId: string,
+    targetUserId: string,
+    now: Date = new Date()
+  ) {
+    if (actorUserId !== targetUserId) {
+      throw AppError.forbidden('You are only authorized to export your own personal data.');
+    }
+    return this.exportUserData(targetUserId, now);
+  }
+
   exportUserData(userId: string, now: Date = new Date()) {
     const account = this.identityService.getPublicInfo(userId);
     if (!account) {
@@ -164,6 +176,17 @@ export class ConsentPrivacyService {
 
   getDeletionRequest(userId: string): DeletionRequestRecord | null {
     return this.deletionRequests.get(userId) ?? null;
+  }
+
+  listAllConsentsForPersistence(): ConsentRecord[] {
+    return [...this.consentLedger];
+  }
+
+  hydrateFromSql(consents: ConsentRecord[]): void {
+    this.consentLedger.length = 0;
+    for (const c of consents) {
+      this.consentLedger.push(Object.freeze(c));
+    }
   }
 }
 

@@ -34,6 +34,7 @@ export function seedPilotInstitution(svc: InstitutionsService, now: Date = new D
   }
 
   const inst = svc.createInstitution({
+    id: 'inst-pilot-sample-uni',
     name: PILOT_INSTITUTION.name,
     code: PILOT_INSTITUTION.code,
     countryCode: PILOT_INSTITUTION.countryCode,
@@ -95,7 +96,9 @@ export function seedPilotInstitution(svc: InstitutionsService, now: Date = new D
     { code: 'NSC 201', title: 'Anatomy and Physiology', unit: nursing.id, level: 1 },
   ];
   for (const item of catalogue) {
+    const slug = item.code.toLowerCase().replace(/\s+/g, '-');
     const course = svc.createCourse({
+      id: `course-pilot-${slug}`,
       institutionId: inst.id,
       orgUnitId: item.unit,
       code: item.code,

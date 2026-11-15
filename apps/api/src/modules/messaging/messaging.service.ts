@@ -186,6 +186,39 @@ export class MessagingService {
   }
 
   /**
+   * Per-object authorization check (BOLA/IDOR prevention):
+   * Only the sender or recipient of a direct message may read it.
+   */
+  getMessageByIdForActor(actorUserId: string, messageId: string): DirectMessageEntity {
+    const msg = this.messagesById.get(messageId);
+    if (!msg || msg.isRemovedByModeration) {
+      throw AppError.notFound('Message not found.');
+    }
+    if (msg.senderId !== actorUserId && msg.recipientId !== actorUserId) {
+      // Return 404 to prevent IDOR enumeration of other users' messages
+      throw AppError.notFound('Message not found.');
+    }
+    return msg;
+  }
+
+  listAllMessagesForPersistence(): DirectMessageEntity[] {
+    return Array.from(this.messagesById.values());
+  }
+
+  hydrateFromSql(messages: DirectMessageEntity[]): void {
+    for (const m of messages) {
+      this.messagesById.set(m.id, m);
+      const list = this.messagesByConversation.get(m.conversationKey) ?? [];
+      list.push(m);
+      this.messagesByConversation.set(m.conversationKey, list);
+      this.clientMessageIndex.set(
+        `${m.conversationKey}:${m.senderId}:${m.clientMessageId}`,
+        m
+      );
+    }
+  }
+
+  /**
    * Security Rule 17: Uploads are disabled in MVP unless virus scanning hook is enabled.
    */
   uploadAttachment(): never {

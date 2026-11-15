@@ -580,5 +580,18 @@ export class DiscoveryService {
       });
     }
   }
+
+  listAllInvitationsForPersistence(): StudyInvitationEntity[] {
+    return Array.from(this.invitations.values());
+  }
+
+  hydrateFromSql(invitations: StudyInvitationEntity[]): void {
+    for (const inv of invitations) {
+      this.invitations.set(inv.id, inv);
+      if (inv.idempotencyKey) {
+        this.invitationsByIdempotency.set(`${inv.senderId}:${inv.idempotencyKey}`, inv.id);
+      }
+    }
+  }
 }
 

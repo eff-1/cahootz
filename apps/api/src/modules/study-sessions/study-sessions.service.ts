@@ -126,7 +126,7 @@ export interface TimerSnapshot {
 /**
  * Valid state transitions per FEATURE_SPECIFICATIONS.md Section 7.2.
  */
-const ALLOWED_TRANSITIONS: Record<SessionState, readonly SessionState[]> = {
+export const ALLOWED_TRANSITIONS: Record<SessionState, readonly SessionState[]> = {
   [SESSION_STATES.CREATED]: [
     SESSION_STATES.INVITED,
     SESSION_STATES.SCHEDULED,
@@ -1408,5 +1408,51 @@ export class StudySessionsService {
       }
     }
     return false;
+  }
+
+  /**
+   * Public transition method validating participant ownership and the `ALLOWED_TRANSITIONS` matrix.
+   */
+  requestTransition(
+    actorUserId: string,
+    sessionId: string,
+    targetState: SessionState,
+    now: Date = new Date()
+  ): StudySessionEntity {
+    const session = this.getSessionForParticipant(actorUserId, sessionId);
+    this.transitionState(
+      session,
+      targetState,
+      actorUserId,
+      `session.transition_${targetState.toLowerCase()}`,
+      now
+    );
+    return session;
+  }
+
+  listAllSessionsForPersistence(): StudySessionEntity[] {
+    return Array.from(this.sessions.values());
+  }
+
+  hydrateFromSql(
+    sessions: StudySessionEntity[],
+    events: SessionEventRecord[]
+  ): void {
+    for (const s of sessions) {
+      this.sessions.set(s.id, s);
+      if (s.idempotencyKey) {
+        this.sessionsByIdempotency.set(`${s.hostId}:${s.idempotencyKey}`, s.id);
+      }
+      this.eventsBySession.set(s.id, []);
+      this.pingsBySession.set(s.id, []);
+    }
+    for (const ev of events) {
+      const list = this.eventsBySession.get(ev.sessionId) ?? [];
+      list.push(ev);
+      this.eventsBySession.set(ev.sessionId, list);
+      if (ev.clientEventId) {
+        this.clientEventIndex.set(`${ev.sessionId}:${ev.clientEventId}`, ev);
+      }
+    }
   }
 }

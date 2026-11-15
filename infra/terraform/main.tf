@@ -23,3 +23,4 @@ output "architecture_mode" {
   value       = "modular-monolith"
   description = "Cahootz MVP runs as a modular monolith with PostgreSQL + Redis + S3-compatible object storage"
 }
+

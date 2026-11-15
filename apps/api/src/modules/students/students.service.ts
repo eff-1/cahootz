@@ -649,4 +649,24 @@ export class StudentsService {
   listBlockedUsers(blockerId: string): UserBlockRecord[] {
     return Array.from(this.blocks.values()).filter((b) => b.blockerId === blockerId);
   }
+
+  listAllProfilesForPersistence(): StudentProfileRecord[] {
+    return Array.from(this.profiles.values());
+  }
+
+  listAllEnrolmentsForPersistence(): StudentCourseEnrolmentRecord[] {
+    return Array.from(this.enrolments.values());
+  }
+
+  hydrateFromSql(
+    profiles: StudentProfileRecord[],
+    enrolments: StudentCourseEnrolmentRecord[]
+  ): void {
+    for (const p of profiles) {
+      this.profiles.set(p.userId, p);
+    }
+    for (const e of enrolments) {
+      this.enrolments.set(e.id, e);
+    }
+  }
 }

@@ -132,6 +132,16 @@ export class ModerationService {
     return [...this.auditLog];
   }
 
+  listAllAuditLogsForPersistence(): AuditLogEntry[] {
+    return [...this.auditLog];
+  }
+
+  hydrateFromSql(entries: AuditLogEntry[]): void {
+    for (const e of entries) {
+      this.auditLog.push(Object.freeze(e));
+    }
+  }
+
   // ─── One-Tap Reporting with Evidence Snapshot ────────────────────
 
   async createReport(
