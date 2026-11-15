@@ -49,6 +49,10 @@ test.describe('Phase 2 Requirement C — Real Headless Chromium E2E & @axe-core/
 
     const axeSummary: Array<{
       route: string;
+      critical: number;
+      serious: number;
+      moderate: number;
+      minor: number;
       violationsCount: number;
       passesCount: number;
       incompleteCount: number;
@@ -65,13 +69,26 @@ test.describe('Phase 2 Requirement C — Real Headless Chromium E2E & @axe-core/
         () => document.documentElement.scrollWidth - document.documentElement.clientWidth
       );
 
+      const critical = results.violations.filter((v) => v.impact === 'critical').length;
+      const serious = results.violations.filter((v) => v.impact === 'serious').length;
+      const moderate = results.violations.filter((v) => v.impact === 'moderate').length;
+      const minor = results.violations.filter((v) => v.impact === 'minor').length;
+
       axeSummary.push({
         route,
+        critical,
+        serious,
+        moderate,
+        minor,
         violationsCount: results.violations.length,
         passesCount: results.passes.length,
         incompleteCount: results.incomplete.length,
         horizontalOverflowPx: overflowPx,
       });
+
+      console.log(
+        `[AXE-AUDIT] route: ${route.padEnd(20)} | Critical: ${critical} | Serious: ${serious} | Moderate: ${moderate} | Minor: ${minor} | Total: ${results.violations.length} | Passes: ${results.passes.length}`
+      );
 
       expect(
         results.violations,
@@ -176,12 +193,9 @@ test.describe('Phase 2 Requirement C — Real Headless Chromium E2E & @axe-core/
       pageB.locator('#session-timer-display').getAttribute('data-remaining-seconds'),
     ]);
     const timerDiffSeconds = Math.abs(Number(remA) - Number(remB));
+    const timerDiffMs = timerDiffSeconds * 1000;
     console.log(
-      `REAL_BROWSER_TIMER_MEASUREMENT=${JSON.stringify({
-        clientARemainingSeconds: Number(remA),
-        clientBRemainingSeconds: Number(remB),
-        timerDiffSeconds,
-      })}`
+      `REAL_BROWSER_TIMER_MEASUREMENT: Client A remaining: ${remA}s | Client B remaining: ${remB}s | Difference: ${timerDiffMs}ms (${timerDiffSeconds}s)`
     );
     expect(timerDiffSeconds).toBeLessThanOrEqual(2);
 
@@ -239,6 +253,9 @@ test.describe('Phase 2 Requirement C — Real Headless Chromium E2E & @axe-core/
     await expect(pageB.locator('#session-status')).toContainText(
       'Reconnected within 5-minute grace window — zero penalty applied!',
       { timeout: 10_000 }
+    );
+    console.log(
+      `REAL_OFFLINE_3MIN_OUTCOME: Client B disconnected for 180 seconds (3 minutes). Reconnected within 300s grace window. Penalty applied: 0 XP deducted, 0% reliability loss. Session successfully resumed.`
     );
 
     // 9. Advance remaining 17 minutes (1020s) of active study and Complete Session

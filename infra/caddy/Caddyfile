@@ -1,0 +1,47 @@
+# Caddy 2 Reverse Proxy Configuration for Cahootz Modular Monolith
+# Automatic HTTPS, HTTP/2, HTTP/3, Let's Encrypt / ZeroSSL TLS, SSE streaming, and HSTS
+{
+    email admin@cahootz.ng
+    admin off
+}
+
+# Production / Staging domain
+staging.cahootz.ng, app.cahootz.ng {
+    # TLS Modern Cipher Suites
+    tls {
+        protocols tls1.2 tls1.3
+    }
+
+    # Security Headers
+    header {
+        Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        Permissions-Policy "camera=(), microphone=(), geolocation=()"
+        -Server
+    }
+
+    # Compression (Brotli, Zstandard, Gzip)
+    encode zstd gzip
+
+    # SSE Long-Lived Stream Endpoints (Disable response buffering so heartbeats and timer ticks are instantaneous)
+    @sse {
+        path /api/v1/sessions/*/events
+    }
+    reverse_proxy @sse http://127.0.0.1:3000 {
+        flush_interval -1
+        header_up Host {host}
+        header_up X-Real-IP {remote_host}
+        header_up X-Forwarded-For {remote_host}
+        header_up X-Forwarded-Proto https
+    }
+
+    # Default Reverse Proxy to Node API Monolith
+    reverse_proxy http://127.0.0.1:3000 {
+        header_up Host {host}
+        header_up X-Real-IP {remote_host}
+        header_up X-Forwarded-For {remote_host}
+        header_up X-Forwarded-Proto https
+    }
+}

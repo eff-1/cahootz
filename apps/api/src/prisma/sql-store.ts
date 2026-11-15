@@ -44,6 +44,22 @@ export class CahootzSqlStore {
     this.initializeSchema();
   }
 
+  /**
+   * Execute an atomic transaction against SQLite.
+   * Acquires an immediate write lock so concurrent writes do not deadlock.
+   */
+  transaction<T>(fn: () => T): T {
+    this.db.exec('BEGIN IMMEDIATE;');
+    try {
+      const result = fn();
+      this.db.exec('COMMIT;');
+      return result;
+    } catch (err) {
+      this.db.exec('ROLLBACK;');
+      throw err;
+    }
+  }
+
   private initializeSchema(): void {
     this.db.exec(`
       PRAGMA journal_mode = WAL;

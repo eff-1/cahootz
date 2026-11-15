@@ -162,5 +162,15 @@ describe('EmailProvider Interface & Real Adapters (Requirement D)', () => {
       await new Promise<void>((resolve) => smtpServer.close(() => resolve()));
     }
   });
+
+  it('5. runs full staging email smoke test: dispatches 6-digit OTP code, rejects invalid code, and confirms student verification status becomes VERIFIED', async () => {
+    const { runEmailSmokeTest } = await import('../../../scripts/staging-email-smoke.ts');
+    const result = await runEmailSmokeTest({
+      env: { NODE_ENV: 'test' },
+    });
+    assert.equal(result.success, true);
+    assert.equal(result.verificationStatus, 'VERIFIED');
+    assert.match(result.codeSent, /^\d{6}$/);
+  });
 });
 

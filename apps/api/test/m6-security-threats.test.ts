@@ -273,6 +273,56 @@ describe('M6 — Hardening: STRIDE Threat Model (T1–T12), BOLA/IDOR Matrix, CS
     );
   });
 
+  it('T9b: Verifies cookies, CSRF, and CSP behind HTTPS reverse proxy (X-Forwarded-Proto, Caddy/Nginx configs)', async () => {
+    const { createCahootzHttpServer } = await import('../src/server.ts');
+    const server = createCahootzHttpServer();
+
+    // 1. Register and Login with reverse-proxy HTTPS headers
+    const regRes = await server.dispatch({
+      method: 'POST',
+      url: '/api/v1/auth/register',
+      headers: {
+        'x-forwarded-proto': 'https',
+        'x-forwarded-for': '102.89.33.1',
+        host: 'app.cahootz.ng',
+      },
+      body: {
+        email: 'proxy.student@live.unilag.edu.ng',
+        password: 'StrongPassword123!',
+        dateOfBirth: '2002-04-10',
+      },
+    });
+
+    assert.equal(regRes.status, 201);
+    assert.ok(regRes.headers['Content-Security-Policy']?.includes("frame-ancestors 'none'"));
+    assert.ok(regRes.headers['Strict-Transport-Security']?.includes('max-age=63072000'));
+    assert.equal(regRes.headers['X-Frame-Options'], 'DENY');
+
+    const loginRes = await server.dispatch({
+      method: 'POST',
+      url: '/api/v1/auth/login',
+      headers: {
+        'x-forwarded-proto': 'https',
+        'x-forwarded-for': '102.89.33.1',
+        host: 'app.cahootz.ng',
+      },
+      body: {
+        email: 'proxy.student@live.unilag.edu.ng',
+        password: 'StrongPassword123!',
+      },
+    });
+
+    assert.equal(loginRes.status, 200);
+    const setCookie = loginRes.headers['Set-Cookie'];
+    assert.ok(setCookie, 'Set-Cookie header must be present');
+    assert.ok(setCookie.includes('HttpOnly'), 'Cookie must be HttpOnly');
+    assert.ok(setCookie.includes('Secure'), 'Cookie must be Secure for HTTPS');
+    assert.ok(setCookie.includes('SameSite=Strict'), 'Cookie must be SameSite=Strict');
+    assert.ok(setCookie.includes('Path=/api/v1/auth'), 'Cookie must be restricted to /api/v1/auth');
+
+    await server.close();
+  });
+
   it('T12 & T-021 (Backup Integrity & Point-in-Time Restore Drill): detects tampering and verifies full count restoration', () => {
     const bundle = backupService.createSignedBackup({
       institutions: institutionsService.searchInstitutions(),

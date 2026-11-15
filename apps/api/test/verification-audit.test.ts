@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { spawn } from 'node:child_process';
 import { createCahootzHttpServer } from '../src/server.ts';
 import { CahootzSqlStore } from '../src/prisma/sql-store.ts';
 import { PasswordService } from '../src/modules/identity/password.service.ts';
@@ -295,13 +296,27 @@ describe('VERIFICATION AUDIT SUITE (Items 1, 2, 3, 4, 7, 9)', () => {
     assert.equal(getAdminActs.status, 200);
     assert.equal((getAdminActs.body as { data: { items: unknown[] } }).data.items.length, 1);
 
-    // Verify /metrics (Prometheus) and /api/v1/observability/metrics (JSON) report all 18 SQLite tables
-    const promMetrics = await server2.dispatch({ method: 'GET', url: '/metrics' });
+    // Verify /metrics and /api/v1/observability/metrics reject unauthenticated requests with 401
+    const unauthMetrics = await server2.dispatch({ method: 'GET', url: '/metrics' });
+    assert.equal(unauthMetrics.status, 401);
+    const unauthJsonMetrics = await server2.dispatch({ method: 'GET', url: '/api/v1/observability/metrics' });
+    assert.equal(unauthJsonMetrics.status, 401);
+
+    // Verify /metrics (Prometheus) and /api/v1/observability/metrics (JSON) report all 18 SQLite tables with Bearer token
+    const promMetrics = await server2.dispatch({
+      method: 'GET',
+      url: '/metrics',
+      headers: { authorization: 'Bearer cahootz-metrics-secret-token' },
+    });
     assert.equal(promMetrics.status, 200);
     assert.ok(String(promMetrics.body).includes('cahootz_sqlite_table_rows{table="community_posts"} 1'));
     assert.ok(String(promMetrics.body).includes('cahootz_sqlite_table_rows{table="sanctions"} 1'));
 
-    const jsonMetrics = await server2.dispatch({ method: 'GET', url: '/api/v1/observability/metrics' });
+    const jsonMetrics = await server2.dispatch({
+      method: 'GET',
+      url: '/api/v1/observability/metrics',
+      headers: { authorization: 'Bearer cahootz-metrics-secret-token' },
+    });
     assert.equal(jsonMetrics.status, 200);
     const counts = (jsonMetrics.body as { data: { sqliteTableRowCounts: Record<string, number> } }).data.sqliteTableRowCounts;
     assert.equal(Object.keys(counts).length, 18);
@@ -313,6 +328,50 @@ describe('VERIFICATION AUDIT SUITE (Items 1, 2, 3, 4, 7, 9)', () => {
     assert.equal(counts.sensitive_admin_actions, 1);
 
     await server2.close();
+  });
+
+  it('Item 1b: Crash resilience — killing the server process with SIGKILL immediately after an acknowledged write preserves data on restart without loss', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cahootz-crash-kill-'));
+    const dbPath = path.join(dir, 'cahootz.sqlite');
+    const metaPath = path.join(dir, 'meta.json');
+
+    // Spawn server child process
+    const child = spawn(
+      process.execPath,
+      ['--experimental-strip-types', 'apps/api/test/crash-server.ts'],
+      {
+        env: { ...process.env, CRASH_DB_PATH: dbPath, CRASH_META_PATH: metaPath, NODE_ENV: 'test' },
+        stdio: 'inherit',
+      }
+    );
+
+    const exitPromise = new Promise<{ code: number | null; signal: string | null }>((resolve) => {
+      child.on('exit', (code, signal) => resolve({ code, signal }));
+    });
+
+    await exitPromise;
+
+    assert.ok(fs.existsSync(metaPath), 'Metadata must have been written before kill');
+    const meta = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
+
+    // Boot fresh server on the SQLite database
+    const recoveredServer = createCahootzHttpServer({ dbPath });
+
+    const hostProfile = recoveredServer.studentsService.findProfile(meta.hostId);
+    assert.ok(hostProfile, 'Host profile must exist after SIGKILL crash recovery');
+    assert.equal(hostProfile?.displayName, 'Host Crasher');
+
+    const session = recoveredServer.studySessionsService.getSessionForParticipant(meta.hostId, meta.sessionId);
+    assert.ok(session, 'Study session must exist after SIGKILL crash recovery');
+    assert.equal(session?.id, meta.sessionId);
+    assert.ok(session?.state, 'Session must have valid state');
+    assert.equal(session?.participants[meta.hostId]?.presenceState, 'PRESENT');
+
+    const recoveredMsg = recoveredServer.messagingService.getMessageByIdForActor(meta.hostId, meta.dmId);
+    assert.ok(recoveredMsg, 'Direct message must survive SIGKILL crash');
+    assert.equal(recoveredMsg?.body, 'Pre-crash direct message that must survive SIGKILL!');
+
+    await recoveredServer.close();
   });
 
   it('Item 2: Auth matches spec (Argon2id, short-lived JWT, rotating refresh in HttpOnly+Secure+SameSite cookie, server-side revocation, uniform errors, rate limits)', async () => {
@@ -789,9 +848,10 @@ describe('VERIFICATION AUDIT SUITE (Items 1, 2, 3, 4, 7, 9)', () => {
     await server.close();
   });
 
-  it('Item 7: Backup then Restore drill into a clean database matches 100%', async () => {
+  it('Item 7: Backup then Restore drill into a clean database matches 100% (including off-site AES-256-GCM S3 copy)', async () => {
     const sourceDbPath = createTempSqlitePath('backup-src');
     const cleanDbPath = createTempSqlitePath('restore-dst');
+    const offsiteCleanDbPath = createTempSqlitePath('s3-restore-dst');
 
     const server = createCahootzHttpServer({ dbPath: sourceDbPath });
     await server.dispatch({
@@ -807,7 +867,7 @@ describe('VERIFICATION AUDIT SUITE (Items 1, 2, 3, 4, 7, 9)', () => {
     const snapshotFromSource = server.sqlStore.exportSnapshot();
     await server.close();
 
-    // Restore into a brand-new, clean database
+    // 7a. Local Snapshot Restore into a brand-new, clean database
     const cleanStore = new CahootzSqlStore(cleanDbPath);
     cleanStore.restoreSnapshotIntoCleanDb(snapshotFromSource);
     const snapshotFromRestored = cleanStore.exportSnapshot();
@@ -816,6 +876,68 @@ describe('VERIFICATION AUDIT SUITE (Items 1, 2, 3, 4, 7, 9)', () => {
     assert.deepEqual(snapshotFromRestored.tables, snapshotFromSource.tables);
     assert.equal(snapshotFromRestored.tables.users.length, 1);
     assert.equal(snapshotFromRestored.tables.consent_log.length, 1);
+
+    // 7b. Off-site Encrypted S3-compatible Backup & Restore Drill
+    const { S3EncryptedBackupService, InMemoryS3Adapter, AwsS3CompatibleAdapter } = await import(
+      '../src/common/backup/s3-encrypted-backup.service.ts'
+    );
+    const mockS3 = new InMemoryS3Adapter();
+    const s3Service = new S3EncryptedBackupService({ storage: mockS3 });
+
+    // Create & upload off-site encrypted backup
+    const backupResult = await s3Service.createAndUploadBackup(sourceDbPath, 'backups/prod-drill.enc.json');
+    assert.equal(backupResult.backupKey, 'backups/prod-drill.enc.json');
+    assert.ok(backupResult.sha256);
+
+    // Verify raw S3 payload is strongly encrypted (AES-256-GCM)
+    const rawS3Buf = await mockS3.getObject('backups/prod-drill.enc.json');
+    const bundle = JSON.parse(rawS3Buf.toString('utf8'));
+    assert.equal(bundle.algorithm, 'aes-256-gcm');
+    assert.equal(bundle.version, '2.0-enc');
+    assert.ok(bundle.iv && bundle.authTag && bundle.ciphertext);
+
+    // Verify tampering detection (tamper with 1 character of ciphertext)
+    const tamperedBundle = {
+      ...bundle,
+      ciphertext: 'A' + bundle.ciphertext.slice(1),
+    };
+    await mockS3.putObject('backups/tampered.enc.json', Buffer.from(JSON.stringify(tamperedBundle)));
+    await assert.rejects(
+      () => s3Service.downloadAndRestore('backups/tampered.enc.json', offsiteCleanDbPath),
+      /Backup decryption or AEAD auth tag verification failed/
+    );
+
+    // Restore from clean off-site copy into a fresh database
+    const restoreResult = await s3Service.downloadAndRestore('backups/prod-drill.enc.json', offsiteCleanDbPath);
+    assert.equal(restoreResult.restored, true);
+    assert.equal(restoreResult.sha256, backupResult.sha256);
+
+    const offsiteRestoredStore = new CahootzSqlStore(offsiteCleanDbPath);
+    const offsiteSnapshot = offsiteRestoredStore.exportSnapshot();
+    offsiteRestoredStore.close();
+
+    assert.deepEqual(offsiteSnapshot.tables, snapshotFromSource.tables);
+
+    // 7c. AWS SigV4 adapter header verification
+    let capturedReqHeaders: Record<string, string> = {};
+    const mockAwsFetch: typeof fetch = async (input, init) => {
+      capturedReqHeaders = init?.headers as Record<string, string>;
+      return new Response(Buffer.from('ok'), { status: 200, headers: { etag: 'test-etag' } });
+    };
+
+    const awsAdapter = new AwsS3CompatibleAdapter({
+      endpoint: 'https://s3.af-south-1.amazonaws.com',
+      bucket: 'cahootz-backups',
+      region: 'af-south-1',
+      accessKeyId: 'AKIA_TEST_KEY',
+      secretAccessKey: 'test-secret-key-12345',
+      fetchFn: mockAwsFetch,
+    });
+
+    await awsAdapter.putObject('test.txt', Buffer.from('hello-offsite'));
+    assert.ok(capturedReqHeaders['x-amz-date']);
+    assert.ok(capturedReqHeaders['x-amz-content-sha256']);
+    assert.match(capturedReqHeaders['Authorization'], /AWS4-HMAC-SHA256 Credential=AKIA_TEST_KEY/);
   });
 
   it('Item 9: Audit log and XP ledger rows cannot be updated or deleted at the SQLite database engine level', () => {

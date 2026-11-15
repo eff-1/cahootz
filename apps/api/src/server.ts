@@ -467,6 +467,126 @@ export function createCahootzHttpServer(
     );
   }
 
+  function persistUserRegistration(userId: string): void {
+    sqlStore.transaction(() => {
+      const u = identityService.listAllUsersForPersistence().find((x) => x.id === userId);
+      if (u) sqlStore.saveUser(u);
+      const consents = consentPrivacyService.listAllConsentsForPersistence().filter((c) => c.userId === userId);
+      for (const c of consents) sqlStore.appendConsentLog(c);
+    });
+  }
+
+  function persistAuthSession(sessionId?: string, userId?: string): void {
+    sqlStore.transaction(() => {
+      const sessions = identityService.listAllSessionsForPersistence();
+      for (const s of sessions) {
+        if ((sessionId && s.id === sessionId) || (userId && s.userId === userId)) {
+          sqlStore.saveAuthSession(s);
+        }
+      }
+    });
+  }
+
+  function persistStudentProfile(userId: string): void {
+    sqlStore.transaction(() => {
+      const p = studentsService.findProfile(userId);
+      if (p) sqlStore.saveStudentProfile(p);
+      const enrolments = studentsService.listAllEnrolmentsForPersistence().filter((e) => e.userId === userId);
+      for (const e of enrolments) sqlStore.saveEnrolment(e);
+    });
+  }
+
+  function persistInvitation(invId: string, attachedSessionId?: string): void {
+    sqlStore.transaction(() => {
+      const inv = discoveryService.listAllInvitationsForPersistence().find((i) => i.id === invId);
+      if (inv) sqlStore.saveInvitation(inv);
+      if (attachedSessionId) {
+        const sess = studySessionsService.listAllSessionsForPersistence().find((s) => s.id === attachedSessionId);
+        if (sess) sqlStore.saveStudySession(sess);
+      }
+    });
+  }
+
+  function persistStudySessionOperation(sessionId: string): void {
+    sqlStore.transaction(() => {
+      const sess = studySessionsService.listAllSessionsForPersistence().find((s) => s.id === sessionId);
+      if (sess) {
+        sqlStore.saveStudySession(sess);
+        const evs = studySessionsService.getSessionEvents(sess.hostId, sess.id);
+        for (const ev of evs) {
+          sqlStore.appendSessionEvent(ev);
+        }
+      }
+      const disputes = studySessionsService.listAllDisputesForPersistence().filter((d) => d.sessionId === sessionId);
+      for (const d of disputes) {
+        sqlStore.saveSessionDispute(d);
+      }
+      if (sess) {
+        const xpEntries = walletService.listAllXpEntriesForPersistence().filter((x) => x.sessionId === sessionId);
+        for (const xp of xpEntries) {
+          sqlStore.appendXpLedger(xp);
+        }
+      }
+    });
+    broadcastAllSseSessions();
+  }
+
+  function persistDirectMessage(messageId: string): void {
+    sqlStore.transaction(() => {
+      const msg = messagingService.listAllMessagesForPersistence().find((m) => m.id === messageId);
+      if (msg) sqlStore.saveDirectMessage(msg);
+    });
+  }
+
+  function persistModerationOperation(reportId?: string, sanctionId?: string, appealId?: string): void {
+    sqlStore.transaction(() => {
+      if (reportId) {
+        const rep = moderationService.listAllReportsForPersistence().find((r) => r.id === reportId);
+        if (rep) sqlStore.saveModerationReport(rep);
+      }
+      if (sanctionId) {
+        const sanc = moderationService.listAllSanctionsForPersistence().find((s) => s.id === sanctionId);
+        if (sanc) sqlStore.saveSanction(sanc);
+      }
+      if (appealId) {
+        const app = moderationService.listAllAppealsForPersistence().find((a) => a.id === appealId);
+        if (app) sqlStore.saveAppeal(app);
+      }
+      for (const aud of moderationService.listAllAuditLogsForPersistence()) {
+        sqlStore.appendAuditLog(aud);
+      }
+    });
+  }
+
+  function persistCommunityPost(postId: string): void {
+    sqlStore.transaction(() => {
+      const post = communitiesService.listAllPostsForPersistence().find((p) => p.id === postId);
+      if (post) sqlStore.saveCommunityPost(post);
+      const answers = communitiesService.listAllAnswersForPersistence().filter((a) => a.postId === postId);
+      for (const a of answers) sqlStore.saveCommunityAnswer(a);
+    });
+  }
+
+  function persistAdminAction(actionId: string): void {
+    sqlStore.transaction(() => {
+      const act = administrationService.listAllSensitiveActionsForPersistence().find((a) => a.id === actionId);
+      if (act) sqlStore.saveSensitiveAdminAction(act);
+      for (const aud of moderationService.listAllAuditLogsForPersistence()) {
+        sqlStore.appendAuditLog(aud);
+      }
+    });
+  }
+
+  function persistUserDeletion(userId: string): void {
+    sqlStore.transaction(() => {
+      const u = identityService.listAllUsersForPersistence().find((x) => x.id === userId);
+      if (u) sqlStore.saveUser(u);
+      for (const s of identityService.listAllSessionsForPersistence().filter((s) => s.userId === userId)) {
+        sqlStore.saveAuthSession(s);
+      }
+    });
+  }
+
   function syncToSql(): void {
     for (const u of identityService.listAllUsersForPersistence()) {
       sqlStore.saveUser(u);
@@ -716,6 +836,33 @@ export function createCahootzHttpServer(
         method === 'GET' &&
         (pathname === '/metrics' || pathname === `${API_BASE_PATH}/observability/metrics`)
       ) {
+        const metricsToken = process.env.METRICS_BEARER_TOKEN || 'cahootz-metrics-secret-token';
+        const authHeader = normHeaders['authorization'];
+        let authorized = false;
+        if (typeof authHeader === 'string' && authHeader.startsWith('Bearer ')) {
+          const token = authHeader.slice(7).trim();
+          if (token === metricsToken) {
+            authorized = true;
+          } else {
+            try {
+              const payload = tokenService.verify(token);
+              if (
+                payload.roles &&
+                (payload.roles.includes(ROLES.SYS_ADMIN) ||
+                  payload.roles.includes(ROLES.PLATFORM_MODERATOR) ||
+                  payload.roles.includes('STAFF_OBSERVABILITY'))
+              ) {
+                authorized = true;
+              }
+            } catch {
+              // invalid token
+            }
+          }
+        }
+        if (!authorized) {
+          throw AppError.unauthenticated('Observability metrics require valid Bearer token.');
+        }
+
         const tableCounts = sqlStore.getTableRowCounts();
         let activeSseCount = 0;
         for (const set of sseClientsBySession.values()) {
@@ -786,7 +933,7 @@ export function createCahootzHttpServer(
           granted: true,
           ipAddress: clientIp,
         });
-        syncToSql();
+        persistUserRegistration(result.userId);
         return { status: 201, headers: responseHeaders, body: { data: result } as T };
       }
 
@@ -806,7 +953,7 @@ export function createCahootzHttpServer(
         if (result.refreshToken) {
           responseHeaders['Set-Cookie'] = formatRefreshCookie(result.refreshToken);
         }
-        syncToSql();
+        persistAuthSession(result.session?.id, result.user?.id);
         return { status: 200, headers: responseHeaders, body: { data: result } as T };
       }
 
@@ -815,7 +962,7 @@ export function createCahootzHttpServer(
         const refreshToken = cookies['refresh_token'] || String(body.refreshToken ?? '');
         const result = await identityService.refresh(refreshToken);
         responseHeaders['Set-Cookie'] = formatRefreshCookie(result.refreshToken);
-        syncToSql();
+        persistAuthSession();
         return { status: 200, headers: responseHeaders, body: { data: result } as T };
       }
 
@@ -823,9 +970,11 @@ export function createCahootzHttpServer(
         const user = requireAuth(normHeaders);
         if (user.sessionId) {
           await identityService.logout(user.sessionId);
+          persistAuthSession(user.sessionId, user.id);
+        } else {
+          persistAuthSession(undefined, user.id);
         }
         responseHeaders['Set-Cookie'] = formatRefreshCookie('', 0);
-        syncToSql();
         return { status: 200, headers: responseHeaders, body: { data: { success: true } } as T };
       }
 
@@ -897,7 +1046,7 @@ export function createCahootzHttpServer(
           visibility: body.visibility,
           isDiscoverable: body.isDiscoverable,
         });
-        syncToSql();
+        persistStudentProfile(user.id);
         return { status: 200, headers: responseHeaders, body: { data: result } as T };
       }
 
@@ -922,8 +1071,27 @@ export function createCahootzHttpServer(
           String(body.blockedId ?? ''),
           body.reason ? String(body.reason) : undefined
         );
-        syncToSql();
+        persistStudentProfile(user.id);
         return { status: 200, headers: responseHeaders, body: { data: block } as T };
+      }
+
+      if (method === 'POST' && pathname === `${API_BASE_PATH}/students/verify-email-request`) {
+        const user = requireAuth(normHeaders);
+        const result = await studentsService.requestEmailDomainVerification(
+          user.id,
+          String(body.institutionalEmail ?? '')
+        );
+        return { status: 200, headers: responseHeaders, body: { data: result } as T };
+      }
+
+      if (method === 'POST' && pathname === `${API_BASE_PATH}/students/verify-email-confirm`) {
+        const user = requireAuth(normHeaders);
+        const profile = await studentsService.confirmEmailDomainVerification(
+          user.id,
+          String(body.code ?? '')
+        );
+        persistStudentProfile(user.id);
+        return { status: 200, headers: responseHeaders, body: { data: profile } as T };
       }
 
       // ─── Discovery & Invitations (`/api/v1/discovery/*`) ─────────
@@ -963,7 +1131,7 @@ export function createCahootzHttpServer(
           durationMinutes: body.durationMinutes ?? body.proposedDurationMinutes,
           idempotencyKey,
         });
-        syncToSql();
+        persistInvitation(invitation.id);
         return { status: 201, headers: responseHeaders, body: { data: invitation } as T };
       }
 
@@ -978,6 +1146,7 @@ export function createCahootzHttpServer(
           ? await discoveryService.declineInvitation(user.id, invId)
           : await discoveryService.acceptInvitation(user.id, invId);
 
+        let attachedSessionId: string | undefined = undefined;
         if (!isDecline && !inv.sessionId) {
           const session = await studySessionsService.createSession(inv.senderId, {
             partnerId: inv.recipientId,
@@ -987,8 +1156,12 @@ export function createCahootzHttpServer(
             idempotencyKey: `inv-session-${inv.id}`,
           });
           discoveryService.attachSessionToInvitation(inv.id, session.id);
+          attachedSessionId = session.id;
         }
-        syncToSql();
+        persistInvitation(inv.id, attachedSessionId);
+        if (attachedSessionId) {
+          persistStudySessionOperation(attachedSessionId);
+        }
         return { status: 200, headers: responseHeaders, body: { data: inv } as T };
       }
 
@@ -1011,7 +1184,7 @@ export function createCahootzHttpServer(
           plannedDurationMinutes: body.plannedDurationMinutes ?? body.durationMinutes,
           idempotencyKey,
         });
-        syncToSql();
+        persistStudySessionOperation(session.id);
         return { status: 201, headers: responseHeaders, body: { data: session } as T };
       }
 
@@ -1066,7 +1239,7 @@ export function createCahootzHttpServer(
           },
           now
         );
-        syncToSql();
+        persistStudySessionOperation(sessionId);
         return { status: 200, headers: responseHeaders, body: { data: session } as T };
       }
 
@@ -1088,7 +1261,7 @@ export function createCahootzHttpServer(
           },
           now
         );
-        syncToSql();
+        persistStudySessionOperation(sessionId);
         return { status: 200, headers: responseHeaders, body: { data: session } as T };
       }
 
@@ -1108,7 +1281,7 @@ export function createCahootzHttpServer(
           },
           now
         );
-        syncToSql();
+        persistStudySessionOperation(sessionId);
         return { status: 201, headers: responseHeaders, body: { data: ping } as T };
       }
 
@@ -1121,7 +1294,7 @@ export function createCahootzHttpServer(
         const pingId = sessionPingRespondMatch[2]!;
         const now = sessionNow(sessionId);
         const ping = studySessionsService.respondToPing(user.id, sessionId, pingId, now);
-        syncToSql();
+        persistStudySessionOperation(sessionId);
         return { status: 200, headers: responseHeaders, body: { data: ping } as T };
       }
 
@@ -1138,7 +1311,7 @@ export function createCahootzHttpServer(
           { reason: body.reason },
           now
         );
-        syncToSql();
+        persistStudySessionOperation(sessionId);
         return { status: 200, headers: responseHeaders, body: { data: session } as T };
       }
 
@@ -1150,7 +1323,7 @@ export function createCahootzHttpServer(
         const sessionId = sessionResumeMatch[1]!;
         const now = sessionNow(sessionId);
         const session = studySessionsService.resumeSession(user.id, sessionId, {}, now);
-        syncToSql();
+        persistStudySessionOperation(sessionId);
         return { status: 200, headers: responseHeaders, body: { data: session } as T };
       }
 
@@ -1162,7 +1335,7 @@ export function createCahootzHttpServer(
         const sessionId = sessionDisconnectMatch[1]!;
         const now = sessionNow(sessionId);
         const session = studySessionsService.reportNetworkDisconnect(user.id, sessionId, now);
-        syncToSql();
+        persistStudySessionOperation(sessionId);
         return { status: 200, headers: responseHeaders, body: { data: session } as T };
       }
 
@@ -1179,7 +1352,7 @@ export function createCahootzHttpServer(
           String(body.resumeToken ?? ''),
           now
         );
-        syncToSql();
+        persistStudySessionOperation(sessionId);
         return { status: 200, headers: responseHeaders, body: { data: result } as T };
       }
 
@@ -1196,7 +1369,7 @@ export function createCahootzHttpServer(
           { emergencyExitReason: body.emergencyExitReason },
           now
         );
-        syncToSql();
+        persistStudySessionOperation(sessionId);
         return { status: 200, headers: responseHeaders, body: { data: session } as T };
       }
 
@@ -1213,7 +1386,7 @@ export function createCahootzHttpServer(
           String(body.reason ?? 'Disputed outcome'),
           now
         );
-        syncToSql();
+        persistStudySessionOperation(sessionId);
         return { status: 201, headers: responseHeaders, body: { data: dispute } as T };
       }
 
@@ -1243,7 +1416,7 @@ export function createCahootzHttpServer(
             }
           }
         }
-        syncToSql();
+        persistStudySessionOperation(sessionId);
         return {
           status: 200,
           headers: responseHeaders,
@@ -1284,7 +1457,7 @@ export function createCahootzHttpServer(
           body: String(body.body ?? ''),
           clientMessageId: String(body.clientMessageId ?? idempotencyKey ?? uuidv7()),
         });
-        syncToSql();
+        persistDirectMessage(msg.id);
         return { status: 201, headers: responseHeaders, body: { data: msg } as T };
       }
 
@@ -1316,7 +1489,7 @@ export function createCahootzHttpServer(
           body: String(body.body ?? ''),
           tags: Array.isArray(body.tags) ? body.tags : ['Q&A'],
         });
-        syncToSql();
+        persistCommunityPost(post.id);
         return { status: 201, headers: responseHeaders, body: { data: post } as T };
       }
 
@@ -1330,7 +1503,7 @@ export function createCahootzHttpServer(
           postAnswersMatch[1]!,
           String(body.body ?? '')
         );
-        syncToSql();
+        persistCommunityPost(answer.postId);
         return { status: 201, headers: responseHeaders, body: { data: answer } as T };
       }
 
@@ -1344,7 +1517,7 @@ export function createCahootzHttpServer(
           acceptAnswerMatch[1]!,
           String(body.answerId ?? '')
         );
-        syncToSql();
+        persistCommunityPost(post.id);
         return { status: 200, headers: responseHeaders, body: { data: post } as T };
       }
 
@@ -1359,7 +1532,7 @@ export function createCahootzHttpServer(
           description: String(body.description ?? 'Student report'),
           evidenceSnapshot: body.evidenceSnapshot ?? { reportedVia: 'student-ui' },
         });
-        syncToSql();
+        persistModerationOperation(report.id);
         return { status: 201, headers: responseHeaders, body: { data: report } as T };
       }
 
@@ -1388,7 +1561,7 @@ export function createCahootzHttpServer(
             reason: String(body.reason ?? 'Moderator sanction'),
           }
         );
-        syncToSql();
+        persistModerationOperation(result.report.id, result.sanction?.id);
         return { status: 200, headers: responseHeaders, body: { data: result } as T };
       }
 
@@ -1405,7 +1578,7 @@ export function createCahootzHttpServer(
           String(body.sanctionId ?? ''),
           String(body.reason ?? 'Requesting independent review')
         );
-        syncToSql();
+        persistModerationOperation(undefined, undefined, appeal.id);
         return { status: 201, headers: responseHeaders, body: { data: appeal } as T };
       }
 
@@ -1420,7 +1593,7 @@ export function createCahootzHttpServer(
           body.decision === 'UPHELD' ? 'UPHELD' : 'OVERTURNED',
           String(body.note ?? 'Reviewed by independent moderator')
         );
-        syncToSql();
+        persistModerationOperation(undefined, undefined, appeal.id);
         return { status: 200, headers: responseHeaders, body: { data: appeal } as T };
       }
 
@@ -1438,7 +1611,7 @@ export function createCahootzHttpServer(
           targetId: String(body.targetId ?? 'MESSAGING_ENABLED'),
           reason: String(body.reason ?? 'Emergency maintenance'),
         });
-        syncToSql();
+        persistAdminAction(req.id);
         return { status: 201, headers: responseHeaders, body: { data: req } as T };
       }
 
@@ -1448,7 +1621,7 @@ export function createCahootzHttpServer(
       if (method === 'POST' && adminApproveMatch) {
         const user = requireAuth(normHeaders);
         const req = administrationService.approveSensitiveAction(user, adminApproveMatch[1]!);
-        syncToSql();
+        persistAdminAction(req.id);
         return { status: 200, headers: responseHeaders, body: { data: req } as T };
       }
 
@@ -1484,7 +1657,7 @@ export function createCahootzHttpServer(
       if (method === 'POST' && pathname === `${API_BASE_PATH}/privacy/delete-account`) {
         const user = requireAuth(normHeaders);
         const deletion = await consentPrivacyService.requestAccountDeletion(user.id);
-        syncToSql();
+        persistUserDeletion(user.id);
         return { status: 200, headers: responseHeaders, body: { data: deletion } as T };
       }
 
