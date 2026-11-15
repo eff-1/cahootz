@@ -45,3 +45,4 @@ staging.cahootz.ng, app.cahootz.ng {
         header_up X-Forwarded-Proto https
     }
 }
+

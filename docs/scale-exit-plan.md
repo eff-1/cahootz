@@ -141,3 +141,4 @@ The migration preserves all 18 existing tables and enforces strict zero-data-los
 - **Status**: Formally recorded as architecture decision **D-022** in `docs/CAHOOTZ/DECISION_LOG.md`.
 - **Approved for Pilot Stage**: Single-instance SQLite WAL with per-operation transactions.
 - **Approved Migration Target**: PostgreSQL 16 + Redis 7 upon breaching any threshold in Section 2.
+
