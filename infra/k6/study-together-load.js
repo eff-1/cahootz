@@ -20,7 +20,7 @@ export const options = {
   },
 };
 
-const BASE_URL = __ENV.API_URL || 'http://127.0.0.1:4100';
+const BASE_URL = __ENV.BASE_URL || __ENV.API_URL || 'http://127.0.0.1:4100';
 const JSON_HEADERS = { 'Content-Type': 'application/json' };
 
 export default function () {
