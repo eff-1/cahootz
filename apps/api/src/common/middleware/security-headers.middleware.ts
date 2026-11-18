@@ -9,6 +9,9 @@ export const SECURITY_HEADERS: Record<string, string> = Object.freeze({
   'Referrer-Policy': 'strict-origin-when-cross-origin',
   'Strict-Transport-Security': 'max-age=63072000; includeSubDomains; preload',
   'Permissions-Policy': 'camera=(), microphone=(), geolocation=()',
+  'Cross-Origin-Opener-Policy': 'same-origin',
+  'Cross-Origin-Resource-Policy': 'same-origin',
+  'Cross-Origin-Embedder-Policy': 'require-corp',
 });
 
 export class SecurityHeadersAndCsrfMiddleware {
