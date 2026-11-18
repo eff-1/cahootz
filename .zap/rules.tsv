@@ -1,0 +1,5 @@
+# OWASP ZAP Baseline Scan Rules Configuration
+# Format: <rule-id>\t<IGNORE|INFO|WARN|FAIL>\t<reason>
+10094	IGNORE	(Base64 Disclosure false positive: JWT access tokens returned in authentication JSON payloads)
+10111	IGNORE	(Authentication Request Identified: Student registration and login endpoints are intentional)
+90005	IGNORE	(Sec-Fetch-Dest Header Missing on ZAP spider crawler requests)
