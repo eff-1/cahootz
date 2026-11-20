@@ -34,7 +34,7 @@ import { AdministrationService } from './modules/administration/administration.s
 import { ConsentPrivacyService } from './modules/consent-privacy/consent-privacy.service.ts';
 import { AnalyticsService } from './modules/analytics/analytics.service.ts';
 import { seedPilotInstitution, type PilotSeedResult } from './seed/pilot-seed.ts';
-import { renderAccessibleWebPage, renderClientAppJs } from './web-ui.ts';
+import { renderAccessibleWebPage, renderClientAppCss, renderClientAppJs } from './web-ui.ts';
 
 export interface HttpDispatchRequest {
   method?: string;
@@ -803,6 +803,33 @@ export function createCahootzHttpServer(
           headers: responseHeaders,
           body: renderClientAppJs() as unknown as T,
           contentType: 'application/javascript; charset=utf-8',
+        };
+      }
+
+      if (method === 'GET' && pathname === '/styles.css') {
+        return {
+          status: 200,
+          headers: responseHeaders,
+          body: renderClientAppCss() as unknown as T,
+          contentType: 'text/css; charset=utf-8',
+        };
+      }
+
+      if (method === 'GET' && pathname === '/robots.txt') {
+        return {
+          status: 200,
+          headers: responseHeaders,
+          body: 'User-agent: *\nDisallow:\n' as unknown as T,
+          contentType: 'text/plain; charset=utf-8',
+        };
+      }
+
+      if (method === 'GET' && pathname === '/sitemap.xml') {
+        return {
+          status: 200,
+          headers: responseHeaders,
+          body: '<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>http://127.0.0.1:4100/</loc></url></urlset>' as unknown as T,
+          contentType: 'application/xml; charset=utf-8',
         };
       }
 

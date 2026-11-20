@@ -1,8 +1,7 @@
 import { BRAND_NAME } from '../../../packages/shared/src/index.ts';
 
 export function renderClientAppJs(): string {
-  return `// Cahootz Student Web Client (Vanilla ES2022, Zero External Dependencies)
-(function () {
+  const code = `(function () {
   const STORAGE_KEY = 'cahootz_auth';
 
   function getAuth() {
@@ -1097,316 +1096,11 @@ export function renderClientAppJs(): string {
   });
 })();
 `;
+  return code.replace(/\/\/[^\n]*/g, '');
 }
 
-export function renderAccessibleWebPage(pathname: string): string | null {
-  const isSessionRoute = pathname === '/sessions/demo' || /^\/sessions\/[^/]+$/.test(pathname);
-  const routeKey = isSessionRoute ? '/sessions/:id' : pathname;
-
-  const pages: Record<string, { title: string; heading: string; content: string }> = {
-    '/': {
-      title: `${BRAND_NAME} — Study Together & Accountability Platform`,
-      heading: `Commit to Study Together on ${BRAND_NAME}`,
-      content: `
-        <p class="subtitle">Academic commitment platform for university students. Find a study partner in your course, commit to a timed session, and build your streak.</p>
-        <div id="auth-status" role="status" aria-live="polite" class="status-banner" hidden></div>
-        <section aria-labelledby="stats-heading" class="grid">
-          <h2 id="stats-heading" class="sr-only">Your Study Progress</h2>
-          <div class="card">
-            <span class="label">Total XP Earned</span>
-            <strong id="dashboard-xp" class="metric">0 XP</strong>
-            <span class="hint">Append-only XP ledger</span>
-          </div>
-          <div class="card">
-            <span class="label">Current Study Streak</span>
-            <strong id="dashboard-streak" class="metric">0 Days</strong>
-            <span class="hint">Africa/Lagos timezone · 1 freeze / 14d</span>
-          </div>
-          <div class="card">
-            <span class="label">Reliability Band</span>
-            <strong id="dashboard-reliability" class="metric">New (100%)</strong>
-            <span class="hint">Zero penalty for network drops</span>
-          </div>
-        </section>
-        <div class="grid">
-          <form id="register-form" class="card form-stack" aria-label="Create Student Account">
-            <h2>Create Student Account</h2>
-            <div class="field">
-              <label for="reg-email">Email Address</label>
-              <input id="reg-email" name="email" type="email" required placeholder="student@live.unilag.edu.ng" />
-            </div>
-            <div class="field">
-              <label for="reg-password">Password (min 10 chars)</label>
-              <input id="reg-password" name="password" type="password" required value="StrongPassword123!" />
-            </div>
-            <div class="field">
-              <label for="reg-dob">Date of Birth</label>
-              <input id="reg-dob" name="dateOfBirth" type="date" required value="2003-04-15" />
-            </div>
-            <button id="register-submit-btn" type="submit" class="btn-primary">Register &amp; Sign In</button>
-          </form>
-          <form id="login-form" class="card form-stack" aria-label="Sign In">
-            <h2>Sign In to Existing Account</h2>
-            <div class="field">
-              <label for="login-email">Email Address</label>
-              <input id="login-email" name="email" type="email" required placeholder="student@live.unilag.edu.ng" />
-            </div>
-            <div class="field">
-              <label for="login-password">Password</label>
-              <input id="login-password" name="password" type="password" required value="StrongPassword123!" />
-            </div>
-            <button id="login-submit-btn" type="submit" class="btn-secondary">Sign In</button>
-          </form>
-        </div>
-      `,
-    },
-    '/onboarding': {
-      title: `Academic Onboarding — ${BRAND_NAME}`,
-      heading: 'Complete Your Academic Profile',
-      content: `
-        <p class="subtitle">Select your institution, department, level, and current courses. Core studying is never blocked while verification is pending.</p>
-        <div id="onboarding-status" role="status" aria-live="polite" class="status-banner" hidden></div>
-        <form id="onboarding-form" aria-label="Student Academic Onboarding" class="card form-stack">
-          <div class="field">
-            <label for="institution-select">University / Institution</label>
-            <select id="institution-select" name="institutionId">
-              <option value="inst-pilot-sample-uni">Sample University (SAMPLE — NOT REAL)</option>
-            </select>
-          </div>
-          <div class="field">
-            <label for="display-name">Display Name</label>
-            <input id="display-name" name="displayName" type="text" required value="Tunde Bakare" />
-          </div>
-          <div class="field">
-            <label for="course-select">Enrolled Course</label>
-            <select id="course-select" name="courseId">
-              <option value="course-pilot-csc-301">CSC 301 — Operating Systems</option>
-            </select>
-          </div>
-          <button id="onboarding-submit-btn" type="submit" class="btn-primary">Save Profile &amp; Continue</button>
-        </form>
-      `,
-    },
-    '/discover': {
-      title: `Discover Study Partners — ${BRAND_NAME}`,
-      heading: 'Discover Study Partners in Your Institution',
-      content: `
-        <p class="subtitle">Matched transparently by shared courses, academic level, availability, and Study Now signal.</p>
-        <div id="discover-status" role="status" aria-live="polite" class="status-banner" hidden></div>
-        <div id="active-session-banner" class="card" hidden></div>
-        <div class="actions">
-          <button id="toggle-study-now-btn" type="button" class="btn-secondary">Looking to Study Now (30m)</button>
-          <button id="refresh-partners-btn" type="button" class="btn-outline">Refresh Matches</button>
-        </div>
-        <section aria-labelledby="incoming-heading" class="stack">
-          <h2 id="incoming-heading">Incoming Study Invitations</h2>
-          <div id="incoming-invitations-list" class="stack">
-            <p class="empty-state">No pending invitations right now.</p>
-          </div>
-        </section>
-        <section aria-labelledby="matches-heading" class="stack">
-          <h2 id="matches-heading">Course Partner Matches</h2>
-          <div id="partners-list" class="stack">
-            <article class="card partner-row">
-              <div>
-                <h3>Zainab M. <span class="badge">Very Reliable</span> <span class="badge-now">Looking to Study Now</span></h3>
-                <p>Shared course: CSC 301 · Goal: Past Questions</p>
-              </div>
-              <a href="/sessions/demo" class="btn-primary">Invite to Study</a>
-            </article>
-          </div>
-        </section>
-      `,
-    },
-    '/sessions/:id': {
-      title: `Study Together Focus Room — ${BRAND_NAME}`,
-      heading: 'Study Together Focus Session',
-      content: `
-        <p class="subtitle">Synchronized server timer · 15s heartbeat · 5-minute fairness reconnect grace · No camera or screen surveillance.</p>
-        <div id="session-status" role="status" aria-live="polite" class="status-banner" hidden></div>
-        <div id="ping-banner" role="alert" class="card ping-alert" hidden>
-          <h2>Accountability Ping Received!</h2>
-          <p>Your study partner checked in on your focus progress.</p>
-          <button id="respond-ping-btn" type="button" class="btn-primary">I'm here</button>
-        </div>
-        <section aria-labelledby="timer-heading" class="card timer-box">
-          <h2 id="timer-heading">Server-Synchronized Focus Timer (<span id="session-state-badge">SCHEDULED</span>)</h2>
-          <div id="session-timer-display" role="timer" aria-label="Remaining focus time" data-remaining-seconds="1500" class="timer-digits">25:00</div>
-          <p class="hint">5-minute reconnect grace active — power cuts or mobile data drops are never penalized.</p>
-          <div class="actions">
-            <button id="checkin-btn" type="button" class="btn-primary">Check In</button>
-            <button id="send-ping-btn" type="button" class="btn-secondary">Send Ping</button>
-            <button id="pause-btn" type="button" class="btn-outline">Pause Timer</button>
-            <button id="resume-btn" type="button" class="btn-outline">Resume Timer</button>
-            <button id="complete-btn" type="button" class="btn-primary">Complete Session</button>
-          </div>
-        </section>
-        <section aria-labelledby="session-metrics-heading" class="grid">
-          <h2 id="session-metrics-heading" class="sr-only">Session Rewards &amp; Streak</h2>
-          <div class="card">
-            <span class="label">Total XP</span>
-            <strong id="session-total-xp" class="metric">0 XP</strong>
-          </div>
-          <div class="card">
-            <span class="label">Current Streak</span>
-            <strong id="session-streak" class="metric">0 Days</strong>
-          </div>
-          <div class="card">
-            <span class="label">Reliability</span>
-            <strong id="session-reliability" class="metric">New (100%)</strong>
-          </div>
-        </section>
-        <form id="dispute-form" aria-label="Dispute Session Outcome" class="card form-stack">
-          <h2>Dispute Session Outcome (24h Window)</h2>
-          <div class="field">
-            <label for="dispute-reason-input">Reason for Dispute (e.g., power outage or mobile data drop)</label>
-            <input id="dispute-reason-input" name="reason" type="text" required value="Power cut during final 5 minutes" />
-          </div>
-          <button id="submit-dispute-btn" type="submit" class="btn-outline">Submit Dispute</button>
-        </form>
-      `,
-    },
-    '/communities': {
-      title: `Course Communities — ${BRAND_NAME}`,
-      heading: 'Course Communities &amp; Q&amp;A',
-      content: `
-        <p class="subtitle">Auto-joined from your enrolled courses. Every post requires a course tag.</p>
-        <div id="communities-status" role="status" aria-live="polite" class="status-banner" hidden></div>
-        <form id="create-post-form" aria-label="Ask a Course Question" class="card form-stack">
-          <h2>Ask a Course Question</h2>
-          <div class="field">
-            <label for="community-course-select">Course Tag (Required)</label>
-            <select id="community-course-select" name="courseId">
-              <option value="course-pilot-csc-301">CSC 301 — Operating Systems</option>
-            </select>
-          </div>
-          <div class="field">
-            <label for="post-title-input">Question Title</label>
-            <input id="post-title-input" name="title" type="text" required placeholder="How does Peterson's solution guarantee mutual exclusion?" />
-          </div>
-          <div class="field">
-            <label for="post-body-input">Question Details</label>
-            <input id="post-body-input" name="body" type="text" required placeholder="Explain the role of the flag array and turn variable..." />
-          </div>
-          <button id="create-post-btn" type="submit" class="btn-primary">Publish Course Question</button>
-        </form>
-        <section aria-labelledby="course-posts-heading" class="stack">
-          <h2 id="course-posts-heading">Recent Course Q&amp;A</h2>
-          <div id="community-posts-list" class="stack">
-            <article class="card">
-              <h3><span class="badge">CSC 301</span> How does Peterson's solution guarantee mutual exclusion?</h3>
-              <p>Accepted Answer: The flag array expresses intent to enter the critical section while turn breaks ties deterministically.</p>
-            </article>
-          </div>
-        </section>
-      `,
-    },
-    '/admin': {
-      title: `Moderation & Two-Approver Admin Console — ${BRAND_NAME}`,
-      heading: 'Safety Moderation &amp; Two-Approver Admin Console',
-      content: `
-        <p class="subtitle">MFA-gated staff operations · SLA-ordered report queue · Independent-moderator appeals · Two-Approver sensitive actions.</p>
-        <div id="admin-status" role="status" aria-live="polite" class="status-banner" hidden></div>
-        <div class="actions">
-          <button id="switch-mod1-btn" type="button" class="btn-secondary">Act as Moderator 1 (MFA)</button>
-          <button id="switch-mod2-btn" type="button" class="btn-outline">Act as Moderator 2 (MFA)</button>
-        </div>
-        <section aria-labelledby="mod-queue-heading" class="card stack">
-          <h2 id="mod-queue-heading">Moderation SLA Queue</h2>
-          <div id="moderation-queue-list" class="stack">
-            <p class="empty-state">No open moderation reports in queue.</p>
-          </div>
-        </section>
-        <form id="file-appeal-form" aria-label="Submit Sanction Appeal" class="card form-stack">
-          <h2>Student Sanction Appeal</h2>
-          <div class="field">
-            <label for="appeal-sanction-id">Sanction ID</label>
-            <input id="appeal-sanction-id" name="sanctionId" type="text" required placeholder="Sanction UUID" />
-          </div>
-          <div class="field">
-            <label for="appeal-reason-input">Appeal Explanation</label>
-            <input id="appeal-reason-input" name="reason" type="text" required value="Context was academic discussion of OS deadlock recovery" />
-          </div>
-          <button id="submit-appeal-btn" type="submit" class="btn-outline">Submit Appeal</button>
-        </form>
-        <section aria-labelledby="appeals-heading" class="card stack">
-          <h2 id="appeals-heading">Pending Appeals (Requires Different Moderator)</h2>
-          <div id="appeals-queue-list" class="stack">
-            <p class="empty-state">No pending sanction appeals.</p>
-          </div>
-        </section>
-        <form id="propose-admin-action-form" aria-label="Propose Sensitive Admin Action" class="card form-stack">
-          <h2>Two-Approver Sensitive Action Queue</h2>
-          <div class="field">
-            <label for="admin-target-input">Target Feature / User ID</label>
-            <input id="admin-target-input" name="targetId" type="text" required value="COURSE_PROPOSALS_ENABLED" />
-          </div>
-          <div class="field">
-            <label for="admin-reason-input">Operational Reason</label>
-            <input id="admin-reason-input" name="reason" type="text" required value="Scheduled end-of-semester catalogue freeze" />
-          </div>
-          <button id="propose-admin-btn" type="submit" class="btn-primary">Propose Sensitive Action</button>
-          <div id="admin-actions-list" class="stack"></div>
-        </form>
-      `,
-    },
-    '/messages': {
-      title: `Study Partner Messages — ${BRAND_NAME}`,
-      heading: '1:1 Academic Direct Messages',
-      content: `
-        <p class="subtitle">Available only between confirmed study partners or shared-course adults. File uploads are disabled in MVP.</p>
-        <div id="messages-status" role="status" aria-live="polite" class="status-banner" hidden></div>
-        <section aria-labelledby="chat-heading" class="card form-stack">
-          <h2 id="chat-heading">Direct Message Conversation</h2>
-          <div id="messages-list" class="stack">
-            <p><strong>Zainab M.:</strong> Ready for our CSC 301 past-question review?</p>
-          </div>
-          <form id="send-message-form" class="form-stack">
-            <div class="field">
-              <label for="chat-recipient-id">Recipient Student ID</label>
-              <input id="chat-recipient-id" name="recipientId" type="text" required placeholder="Partner User ID" />
-            </div>
-            <div class="field">
-              <label for="chat-message-input">Your Message</label>
-              <input id="chat-message-input" name="body" type="text" required placeholder="Write a message..." />
-            </div>
-            <div class="actions">
-              <button id="send-message-btn" type="submit" class="btn-primary">Send Message</button>
-              <button id="report-user-btn" type="button" class="btn-outline">One-Tap Report</button>
-              <button id="block-user-btn" type="button" class="btn-outline">Block Student</button>
-            </div>
-          </form>
-        </section>
-      `,
-    },
-    '/settings/privacy': {
-      title: `Privacy & Data Rights (NDPA 2023) — ${BRAND_NAME}`,
-      heading: 'Privacy, Security &amp; NDPA 2023 Data Rights',
-      content: `
-        <p class="subtitle">Manage profile discoverability, active device sessions, JSON data portability export, and 30-day account deletion.</p>
-        <div id="privacy-status" role="status" aria-live="polite" class="status-banner" hidden></div>
-        <section aria-labelledby="rights-heading" class="card stack">
-          <h2 id="rights-heading">Self-Service Controls</h2>
-          <div class="actions">
-            <button id="export-data-btn" type="button" class="btn-primary">Export My Data (JSON)</button>
-            <button id="delete-account-btn" type="button" class="btn-outline">Request Account Deletion (30d Grace)</button>
-          </div>
-          <pre id="privacy-output" class="code-box" hidden></pre>
-        </section>
-      `,
-    },
-  };
-
-  const page = pages[routeKey];
-  if (!page) return null;
-
-  return `<!DOCTYPE html>
-<html lang="en-NG">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>${page.title}</title>
-  <style>
+export function renderClientAppCss(): string {
+  return `
     :root {
       --navy: #0B1B3A;
       --blue: #1D4ED8;
@@ -1463,39 +1157,42 @@ export function renderAccessibleWebPage(pathname: string): string | null {
       color: #FFFFFF;
       text-decoration: none;
       font-weight: 600;
-      min-height: 44px;
-      min-width: 44px;
+      margin-right: 12px;
       display: inline-flex;
       align-items: center;
-      padding: 0 8px;
-    }
-    nav a:hover, nav a:focus { text-decoration: underline; }
-    .nav-user {
-      font-size: 0.85rem;
-      color: #E2E8F0;
+      min-height: 44px;
       padding: 4px 8px;
     }
+    nav a:focus, nav a:hover { text-decoration: underline; }
+    .nav-user { font-size: 0.9rem; color: #E2E8F0; }
     main {
-      max-width: 900px;
-      margin: 0 auto;
-      padding: 20px 16px 48px;
+      max-width: 960px;
+      margin: 24px auto;
+      padding: 0 16px 48px;
     }
-    h1 { font-size: 1.5rem; margin-top: 0; }
-    h2 { font-size: 1.2rem; margin-top: 0; }
-    h3 { font-size: 1.05rem; margin-top: 0; }
-    .subtitle { color: var(--muted); margin-bottom: 16px; }
+    h1 { font-size: 1.8rem; margin: 0 0 12px; color: var(--navy); }
+    h2 { font-size: 1.3rem; margin: 0 0 8px; color: var(--navy); }
+    h3 { font-size: 1.1rem; margin: 0 0 6px; }
+    p.subtitle { color: var(--muted); margin: 0 0 20px; font-size: 1rem; }
     .grid {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
       gap: 16px;
-      margin-bottom: 20px;
+      margin-bottom: 24px;
     }
-    .stack { display: flex; flex-direction: column; gap: 16px; margin-bottom: 20px; }
+    .stack { display: flex; flex-direction: column; gap: 14px; margin-bottom: 24px; }
     .card {
       background: var(--surface);
       border: 1px solid #CBD5E1;
       border-radius: 12px;
       padding: 16px;
+      box-shadow: 0 1px 3px rgba(11,27,58,0.06);
+    }
+    .card-partner {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      border-left: 4px solid var(--blue);
     }
     .ping-alert {
       border: 2px solid var(--blue);
@@ -1579,7 +1276,317 @@ export function renderAccessibleWebPage(pathname: string): string | null {
       overflow-x: auto;
       font-size: 0.8rem;
     }
-  </style>
+  `;
+}
+
+export function renderAccessibleWebPage(pathname: string): string | null {
+  const isSessionRoute = pathname === '/sessions/demo' || /^\/sessions\/[^/]+$/.test(pathname);
+  const routeKey = isSessionRoute ? '/sessions/:id' : pathname;
+
+  const pages: Record<string, { title: string; heading: string; content: string }> = {
+    '/': {
+      title: `${BRAND_NAME} — Study Together & Accountability Platform`,
+      heading: `Commit to Study Together on ${BRAND_NAME}`,
+      content: `
+        <p class="subtitle">Academic commitment platform for university students. Find a study partner in your course, commit to a timed session, and build your streak.</p>
+        <div id="auth-status" role="status" aria-live="polite" class="status-banner" hidden></div>
+        <section aria-labelledby="stats-heading" class="grid">
+          <h2 id="stats-heading" class="sr-only">Your Study Progress</h2>
+          <div class="card">
+            <span class="label">Total XP Earned</span>
+            <strong id="dashboard-xp" class="metric">0 XP</strong>
+            <span class="hint">Append-only XP ledger</span>
+          </div>
+          <div class="card">
+            <span class="label">Current Study Streak</span>
+            <strong id="dashboard-streak" class="metric">0 Days</strong>
+            <span class="hint">Africa/Lagos timezone · 1 freeze / 14d</span>
+          </div>
+          <div class="card">
+            <span class="label">Reliability Band</span>
+            <strong id="dashboard-reliability" class="metric">New (100%)</strong>
+            <span class="hint">Zero penalty for network drops</span>
+          </div>
+        </section>
+        <div class="grid">
+          <form id="register-form" method="POST" action="#" class="card form-stack" aria-label="Create Student Account">
+            <h2>Create Student Account</h2>
+            <div class="field">
+              <label for="reg-email">Email Address</label>
+              <input id="reg-email" name="email" type="email" required placeholder="student@live.unilag.edu.ng" />
+            </div>
+            <div class="field">
+              <label for="reg-password">Password (min 10 chars)</label>
+              <input id="reg-password" name="password" type="password" required placeholder="Min 10 characters" />
+            </div>
+            <div class="field">
+              <label for="reg-dob">Date of Birth</label>
+              <input id="reg-dob" name="dateOfBirth" type="date" required />
+            </div>
+            <button id="register-submit-btn" type="submit" class="btn-primary">Register &amp; Sign In</button>
+          </form>
+          <form id="login-form" method="POST" action="#" class="card form-stack" aria-label="Sign In">
+            <h2>Sign In to Existing Account</h2>
+            <div class="field">
+              <label for="login-email">Email Address</label>
+              <input id="login-email" name="email" type="email" required placeholder="student@live.unilag.edu.ng" />
+            </div>
+            <div class="field">
+              <label for="login-password">Password</label>
+              <input id="login-password" name="password" type="password" required placeholder="Your password" />
+            </div>
+            <button id="login-submit-btn" type="submit" class="btn-secondary">Sign In</button>
+          </form>
+        </div>
+      `,
+    },
+    '/onboarding': {
+      title: `Academic Onboarding — ${BRAND_NAME}`,
+      heading: 'Complete Your Academic Profile',
+      content: `
+        <p class="subtitle">Select your institution, department, level, and current courses. Core studying is never blocked while verification is pending.</p>
+        <div id="onboarding-status" role="status" aria-live="polite" class="status-banner" hidden></div>
+        <form id="onboarding-form" method="POST" action="#" aria-label="Student Academic Onboarding" class="card form-stack">
+          <div class="field">
+            <label for="institution-select">University / Institution</label>
+            <select id="institution-select" name="institutionId">
+              <option value="inst-pilot-sample-uni">Sample University (SAMPLE — NOT REAL)</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="display-name">Display Name</label>
+            <input id="display-name" name="displayName" type="text" required placeholder="Display Name" />
+          </div>
+          <div class="field">
+            <label for="course-select">Enrolled Course</label>
+            <select id="course-select" name="courseId">
+              <option value="course-pilot-csc-301">CSC 301 — Operating Systems</option>
+            </select>
+          </div>
+          <button id="onboarding-submit-btn" type="submit" class="btn-primary">Save Profile &amp; Continue</button>
+        </form>
+      `,
+    },
+    '/discover': {
+      title: `Discover Study Partners — ${BRAND_NAME}`,
+      heading: 'Discover Study Partners in Your Institution',
+      content: `
+        <p class="subtitle">Matched transparently by shared courses, academic level, availability, and Study Now signal.</p>
+        <div id="discover-status" role="status" aria-live="polite" class="status-banner" hidden></div>
+        <div id="active-session-banner" class="card" hidden></div>
+        <div class="actions">
+          <button id="toggle-study-now-btn" type="button" class="btn-secondary">Looking to Study Now (30m)</button>
+          <button id="refresh-partners-btn" type="button" class="btn-outline">Refresh Matches</button>
+        </div>
+        <section aria-labelledby="incoming-heading" class="stack">
+          <h2 id="incoming-heading">Incoming Study Invitations</h2>
+          <div id="incoming-invitations-list" class="stack">
+            <p class="empty-state">No pending invitations right now.</p>
+          </div>
+        </section>
+        <section aria-labelledby="matches-heading" class="stack">
+          <h2 id="matches-heading">Course Partner Matches</h2>
+          <div id="partners-list" class="stack">
+            <article class="card partner-row">
+              <div>
+                <h3>Zainab M. <span class="badge">Very Reliable</span> <span class="badge-now">Looking to Study Now</span></h3>
+                <p>Shared course: CSC 301 · Goal: Past Questions</p>
+              </div>
+              <a href="/sessions/demo" class="btn-primary">Invite to Study</a>
+            </article>
+          </div>
+        </section>
+      `,
+    },
+    '/sessions/:id': {
+      title: `Study Together Focus Room — ${BRAND_NAME}`,
+      heading: 'Study Together Focus Session',
+      content: `
+        <p class="subtitle">Synchronized server timer · 15s heartbeat · 5-minute fairness reconnect grace · No camera or screen surveillance.</p>
+        <div id="session-status" role="status" aria-live="polite" class="status-banner" hidden></div>
+        <div id="ping-banner" role="alert" class="card ping-alert" hidden>
+          <h2>Accountability Ping Received!</h2>
+          <p>Your study partner checked in on your focus progress.</p>
+          <button id="respond-ping-btn" type="button" class="btn-primary">I'm here</button>
+        </div>
+        <section aria-labelledby="timer-heading" class="card timer-box">
+          <h2 id="timer-heading">Server-Synchronized Focus Timer (<span id="session-state-badge">SCHEDULED</span>)</h2>
+          <div id="session-timer-display" role="timer" aria-label="Remaining focus time" data-remaining-seconds="1500" class="timer-digits">25:00</div>
+          <p class="hint">5-minute reconnect grace active — power cuts or mobile data drops are never penalized.</p>
+          <div class="actions">
+            <button id="checkin-btn" type="button" class="btn-primary">Check In</button>
+            <button id="send-ping-btn" type="button" class="btn-secondary">Send Ping</button>
+            <button id="pause-btn" type="button" class="btn-outline">Pause Timer</button>
+            <button id="resume-btn" type="button" class="btn-outline">Resume Timer</button>
+            <button id="complete-btn" type="button" class="btn-primary">Complete Session</button>
+          </div>
+        </section>
+        <section aria-labelledby="session-metrics-heading" class="grid">
+          <h2 id="session-metrics-heading" class="sr-only">Session Rewards &amp; Streak</h2>
+          <div class="card">
+            <span class="label">Total XP</span>
+            <strong id="session-total-xp" class="metric">0 XP</strong>
+          </div>
+          <div class="card">
+            <span class="label">Current Streak</span>
+            <strong id="session-streak" class="metric">0 Days</strong>
+          </div>
+          <div class="card">
+            <span class="label">Reliability</span>
+            <strong id="session-reliability" class="metric">New (100%)</strong>
+          </div>
+        </section>
+        <form id="dispute-form" method="POST" action="#" aria-label="Dispute Session Outcome" class="card form-stack">
+          <h2>Dispute Session Outcome (24h Window)</h2>
+          <div class="field">
+            <label for="dispute-reason-input">Reason for Dispute (e.g., power outage or mobile data drop)</label>
+            <input id="dispute-reason-input" name="reason" type="text" required placeholder="Reason for dispute" />
+          </div>
+          <button id="submit-dispute-btn" type="submit" class="btn-outline">Submit Dispute</button>
+        </form>
+      `,
+    },
+    '/communities': {
+      title: `Course Communities — ${BRAND_NAME}`,
+      heading: 'Course Communities &amp; Q&amp;A',
+      content: `
+        <p class="subtitle">Auto-joined from your enrolled courses. Every post requires a course tag.</p>
+        <div id="communities-status" role="status" aria-live="polite" class="status-banner" hidden></div>
+        <form id="create-post-form" method="POST" action="#" aria-label="Ask a Course Question" class="card form-stack">
+          <h2>Ask a Course Question</h2>
+          <div class="field">
+            <label for="community-course-select">Course Tag (Required)</label>
+            <select id="community-course-select" name="courseId">
+              <option value="course-pilot-csc-301">CSC 301 — Operating Systems</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="post-title-input">Question Title</label>
+            <input id="post-title-input" name="title" type="text" required placeholder="How does Peterson's solution guarantee mutual exclusion?" />
+          </div>
+          <div class="field">
+            <label for="post-body-input">Question Details</label>
+            <input id="post-body-input" name="body" type="text" required placeholder="Explain the role of the flag array and turn variable..." />
+          </div>
+          <button id="create-post-btn" type="submit" class="btn-primary">Publish Course Question</button>
+        </form>
+        <section aria-labelledby="course-posts-heading" class="stack">
+          <h2 id="course-posts-heading">Recent Course Q&amp;A</h2>
+          <div id="community-posts-list" class="stack">
+            <article class="card">
+              <h3><span class="badge">CSC 301</span> How does Peterson's solution guarantee mutual exclusion?</h3>
+              <p>Accepted Answer: The flag array expresses intent to enter the critical section while turn breaks ties deterministically.</p>
+            </article>
+          </div>
+        </section>
+      `,
+    },
+    '/admin': {
+      title: `Moderation & Two-Approver Admin Console — ${BRAND_NAME}`,
+      heading: 'Safety Moderation &amp; Two-Approver Admin Console',
+      content: `
+        <p class="subtitle">MFA-gated staff operations · SLA-ordered report queue · Independent-moderator appeals · Two-Approver sensitive actions.</p>
+        <div id="admin-status" role="status" aria-live="polite" class="status-banner" hidden></div>
+        <div class="actions">
+          <button id="switch-mod1-btn" type="button" class="btn-secondary">Act as Moderator 1 (MFA)</button>
+          <button id="switch-mod2-btn" type="button" class="btn-outline">Act as Moderator 2 (MFA)</button>
+        </div>
+        <section aria-labelledby="mod-queue-heading" class="card stack">
+          <h2 id="mod-queue-heading">Moderation SLA Queue</h2>
+          <div id="moderation-queue-list" class="stack">
+            <p class="empty-state">No open moderation reports in queue.</p>
+          </div>
+        </section>
+        <form id="file-appeal-form" method="POST" action="#" aria-label="Submit Sanction Appeal" class="card form-stack">
+          <h2>Student Sanction Appeal</h2>
+          <div class="field">
+            <label for="appeal-sanction-id">Sanction ID</label>
+            <input id="appeal-sanction-id" name="sanctionId" type="text" required placeholder="Sanction UUID" />
+          </div>
+          <div class="field">
+            <label for="appeal-reason-input">Appeal Explanation</label>
+            <input id="appeal-reason-input" name="reason" type="text" required placeholder="Explanation of appeal" />
+          </div>
+          <button id="submit-appeal-btn" type="submit" class="btn-outline">Submit Appeal</button>
+        </form>
+        <section aria-labelledby="appeals-heading" class="card stack">
+          <h2 id="appeals-heading">Pending Appeals (Requires Different Moderator)</h2>
+          <div id="appeals-queue-list" class="stack">
+            <p class="empty-state">No pending sanction appeals.</p>
+          </div>
+        </section>
+        <form id="propose-admin-action-form" method="POST" action="#" aria-label="Propose Sensitive Admin Action" class="card form-stack">
+          <h2>Two-Approver Sensitive Action Queue</h2>
+          <div class="field">
+            <label for="admin-target-input">Target Feature / User ID</label>
+            <input id="admin-target-input" name="targetId" type="text" required placeholder="Target Feature or User ID" />
+          </div>
+          <div class="field">
+            <label for="admin-reason-input">Operational Reason</label>
+            <input id="admin-reason-input" name="reason" type="text" required placeholder="Operational reason for action" />
+          </div>
+          <button id="propose-admin-btn" type="submit" class="btn-primary">Propose Sensitive Action</button>
+          <div id="admin-actions-list" class="stack"></div>
+        </form>
+      `,
+    },
+    '/messages': {
+      title: `Study Partner Messages — ${BRAND_NAME}`,
+      heading: '1:1 Academic Direct Messages',
+      content: `
+        <p class="subtitle">Available only between confirmed study partners or shared-course adults. File uploads are disabled in MVP.</p>
+        <div id="messages-status" role="status" aria-live="polite" class="status-banner" hidden></div>
+        <section aria-labelledby="chat-heading" class="card form-stack">
+          <h2 id="chat-heading">Direct Message Conversation</h2>
+          <div id="messages-list" class="stack">
+            <p><strong>Zainab M.:</strong> Ready for our CSC 301 past-question review?</p>
+          </div>
+          <form id="send-message-form" method="POST" action="#" class="form-stack">
+            <div class="field">
+              <label for="chat-recipient-id">Recipient Student ID</label>
+              <input id="chat-recipient-id" name="recipientId" type="text" required placeholder="Partner User ID" />
+            </div>
+            <div class="field">
+              <label for="chat-message-input">Your Message</label>
+              <input id="chat-message-input" name="body" type="text" required placeholder="Write a message..." />
+            </div>
+            <div class="actions">
+              <button id="send-message-btn" type="submit" class="btn-primary">Send Message</button>
+              <button id="report-user-btn" type="button" class="btn-outline">One-Tap Report</button>
+              <button id="block-user-btn" type="button" class="btn-outline">Block Student</button>
+            </div>
+          </form>
+        </section>
+      `,
+    },
+    '/settings/privacy': {
+      title: `Privacy & Data Rights (NDPA 2023) — ${BRAND_NAME}`,
+      heading: 'Privacy, Security &amp; NDPA 2023 Data Rights',
+      content: `
+        <p class="subtitle">Manage profile discoverability, active device sessions, JSON data portability export, and 30-day account deletion.</p>
+        <div id="privacy-status" role="status" aria-live="polite" class="status-banner" hidden></div>
+        <section aria-labelledby="rights-heading" class="card stack">
+          <h2 id="rights-heading">Self-Service Controls</h2>
+          <div class="actions">
+            <button id="export-data-btn" type="button" class="btn-primary">Export My Data (JSON)</button>
+            <button id="delete-account-btn" type="button" class="btn-outline">Request Account Deletion (30d Grace)</button>
+          </div>
+          <pre id="privacy-output" class="code-box" hidden></pre>
+        </section>
+      `,
+    },
+  };
+
+  const page = pages[routeKey];
+  if (!page) return null;
+
+  return `<!DOCTYPE html>
+<html lang="en-NG">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>${page.title}</title>
+  <link rel="stylesheet" href="/styles.css" />
   <script src="/app.js" defer></script>
 </head>
 <body>
