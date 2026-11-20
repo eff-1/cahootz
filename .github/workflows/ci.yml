@@ -63,13 +63,24 @@ jobs:
           curl -fsS http://127.0.0.1:4100/api/v1/health
 
       - name: OWASP ZAP Baseline Scan against Running Server
-        uses: zaproxy/action-baseline@v0.12.0
+        run: |
+          docker run -v $(pwd):/zap/wrk/:rw --network=host -t ghcr.io/zaproxy/zaproxy:stable zap-baseline.py \
+            -t http://127.0.0.1:4100 \
+            -c .zap/rules.tsv \
+            -J report_json.json \
+            -w report_md.md \
+            -r report_html.html \
+            -a -j
+
+      - name: Upload OWASP ZAP Baseline Reports
+        if: always()
+        uses: actions/upload-artifact@v4
         with:
-          target: 'http://127.0.0.1:4100'
-          rules_file_name: '.zap/rules.tsv'
-          cmd_options: '-a -j'
-          allow_issue_writing: false
-          fail_action: true
+          name: zap-baseline-report
+          path: |
+            report_json.json
+            report_md.md
+            report_html.html
 
       - name: Realistic 5-Minute 100-VU k6 Load Test (Login, Heartbeats, Pings vs Persisted DB)
         uses: grafana/k6-action@v0.3.1
