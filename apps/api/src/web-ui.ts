@@ -1310,6 +1310,7 @@ export function renderAccessibleWebPage(pathname: string): string | null {
         </section>
         <div class="grid">
           <form id="register-form" method="POST" action="#" class="card form-stack" aria-label="Create Student Account">
+            <input type="hidden" name="_csrf" value="cahootz-csrf-token" />
             <h2>Create Student Account</h2>
             <div class="field">
               <label for="reg-email">Email Address</label>
@@ -1326,6 +1327,7 @@ export function renderAccessibleWebPage(pathname: string): string | null {
             <button id="register-submit-btn" type="submit" class="btn-primary">Register &amp; Sign In</button>
           </form>
           <form id="login-form" method="POST" action="#" class="card form-stack" aria-label="Sign In">
+            <input type="hidden" name="_csrf" value="cahootz-csrf-token" />
             <h2>Sign In to Existing Account</h2>
             <div class="field">
               <label for="login-email">Email Address</label>
@@ -1347,6 +1349,7 @@ export function renderAccessibleWebPage(pathname: string): string | null {
         <p class="subtitle">Select your institution, department, level, and current courses. Core studying is never blocked while verification is pending.</p>
         <div id="onboarding-status" role="status" aria-live="polite" class="status-banner" hidden></div>
         <form id="onboarding-form" method="POST" action="#" aria-label="Student Academic Onboarding" class="card form-stack">
+          <input type="hidden" name="_csrf" value="cahootz-csrf-token" />
           <div class="field">
             <label for="institution-select">University / Institution</label>
             <select id="institution-select" name="institutionId">
@@ -1437,6 +1440,7 @@ export function renderAccessibleWebPage(pathname: string): string | null {
           </div>
         </section>
         <form id="dispute-form" method="POST" action="#" aria-label="Dispute Session Outcome" class="card form-stack">
+          <input type="hidden" name="_csrf" value="cahootz-csrf-token" />
           <h2>Dispute Session Outcome (24h Window)</h2>
           <div class="field">
             <label for="dispute-reason-input">Reason for Dispute (e.g., power outage or mobile data drop)</label>
@@ -1453,6 +1457,7 @@ export function renderAccessibleWebPage(pathname: string): string | null {
         <p class="subtitle">Auto-joined from your enrolled courses. Every post requires a course tag.</p>
         <div id="communities-status" role="status" aria-live="polite" class="status-banner" hidden></div>
         <form id="create-post-form" method="POST" action="#" aria-label="Ask a Course Question" class="card form-stack">
+          <input type="hidden" name="_csrf" value="cahootz-csrf-token" />
           <h2>Ask a Course Question</h2>
           <div class="field">
             <label for="community-course-select">Course Tag (Required)</label>
@@ -1498,6 +1503,7 @@ export function renderAccessibleWebPage(pathname: string): string | null {
           </div>
         </section>
         <form id="file-appeal-form" method="POST" action="#" aria-label="Submit Sanction Appeal" class="card form-stack">
+          <input type="hidden" name="_csrf" value="cahootz-csrf-token" />
           <h2>Student Sanction Appeal</h2>
           <div class="field">
             <label for="appeal-sanction-id">Sanction ID</label>
@@ -1516,6 +1522,7 @@ export function renderAccessibleWebPage(pathname: string): string | null {
           </div>
         </section>
         <form id="propose-admin-action-form" method="POST" action="#" aria-label="Propose Sensitive Admin Action" class="card form-stack">
+          <input type="hidden" name="_csrf" value="cahootz-csrf-token" />
           <h2>Two-Approver Sensitive Action Queue</h2>
           <div class="field">
             <label for="admin-target-input">Target Feature / User ID</label>
@@ -1542,6 +1549,7 @@ export function renderAccessibleWebPage(pathname: string): string | null {
             <p><strong>Zainab M.:</strong> Ready for our CSC 301 past-question review?</p>
           </div>
           <form id="send-message-form" method="POST" action="#" class="form-stack">
+            <input type="hidden" name="_csrf" value="cahootz-csrf-token" />
             <div class="field">
               <label for="chat-recipient-id">Recipient Student ID</label>
               <input id="chat-recipient-id" name="recipientId" type="text" required placeholder="Partner User ID" />

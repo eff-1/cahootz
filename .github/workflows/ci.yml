@@ -64,7 +64,9 @@ jobs:
 
       - name: OWASP ZAP Baseline Scan against Running Server
         run: |
-          docker run -v $(pwd):/zap/wrk/:rw --network=host -t ghcr.io/zaproxy/zaproxy:stable zap-baseline.py \
+          touch report_json.json report_md.md report_html.html
+          chmod a+w report_json.json report_md.md report_html.html
+          docker run --rm -v $(pwd):/zap/wrk/:rw --network=host -t ghcr.io/zaproxy/zaproxy:stable zap-baseline.py \
             -t http://127.0.0.1:4100 \
             -c .zap/rules.tsv \
             -J report_json.json \
