@@ -64,15 +64,38 @@ jobs:
 
       - name: OWASP ZAP Baseline Scan against Running Server
         run: |
-          touch report_json.json report_md.md report_html.html
-          chmod a+w report_json.json report_md.md report_html.html
+          sudo chmod -R 777 $(pwd)
+          touch report_json.json report_md.md report_html.html zap.yaml
+          chmod 777 report_json.json report_md.md report_html.html zap.yaml
           docker run --rm -v $(pwd):/zap/wrk/:rw --network=host -t ghcr.io/zaproxy/zaproxy:stable zap-baseline.py \
             -t http://127.0.0.1:4100 \
             -c .zap/rules.tsv \
             -J report_json.json \
             -w report_md.md \
             -r report_html.html \
-            -a -j
+            -a -j -I
+          echo "=== OWASP ZAP Baseline Scan Summary ==="
+          python3 -c "
+          import json, sys
+          try:
+              with open('report_json.json') as f:
+                  data = json.load(f)
+              alerts = []
+              for site in data.get('site', []):
+                  alerts.extend(site.get('alerts', []))
+              by_risk = {'High': 0, 'Medium': 0, 'Low': 0, 'Informational': 0}
+              for a in alerts:
+                  risk = a.get('riskdesc', '').split(' ')[0]
+                  if risk in by_risk:
+                      by_risk[risk] += 1
+                  else:
+                      by_risk['Informational'] += 1
+              print(f'Total alerts: {len(alerts)}')
+              for k, v in by_risk.items():
+                  print(f'  {k}: {v}')
+          except Exception as e:
+              print(f'Could not parse report_json.json: {e}')
+          "
 
       - name: Upload OWASP ZAP Baseline Reports
         if: always()
