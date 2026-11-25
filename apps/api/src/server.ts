@@ -794,7 +794,8 @@ export function createCahootzHttpServer(
       const idempotencyKey =
         normHeaders['idempotency-key']?.trim() ||
         (typeof body.idempotencyKey === 'string' ? body.idempotencyKey.trim() : undefined);
-      const clientIp = req.ip ?? normHeaders['x-forwarded-for'] ?? '127.0.0.1';
+      const clientIp =
+        normHeaders['x-forwarded-for']?.split(',')[0]?.trim() || req.ip || '127.0.0.1';
 
       // ─── Client JS & Accessible Web App Routes (`GET /app.js`, `GET /`, `/onboarding`, etc.) ───
       if (method === 'GET' && pathname === '/app.js') {
