@@ -108,8 +108,5 @@ jobs:
             report_html.html
 
       - name: Realistic 5-Minute 100-VU k6 Load Test (Login, Heartbeats, Pings vs Persisted DB)
-        uses: grafana/k6-action@v0.3.1
-        with:
-          filename: infra/k6/study-together-load.js
-        env:
-          BASE_URL: http://127.0.0.1:4100
+        run: |
+          docker run --rm --network=host -v $(pwd):/scripts -w /scripts grafana/k6:latest run infra/k6/study-together-load.js -e BASE_URL=http://127.0.0.1:4100

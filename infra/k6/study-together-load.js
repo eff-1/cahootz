@@ -45,7 +45,7 @@ export default function () {
     { headers: ipHeaderB }
   );
   check(regB, { 'regB 201': (r) => r.status === 201 });
-  const userBId = regB.json('data.userId');
+  const userBId = regB && regB.status === 201 ? regB.json('data.userId') : null;
 
   const loginA = http.post(
     `${BASE_URL}/api/v1/auth/login`,
@@ -60,8 +60,13 @@ export default function () {
   check(loginA, { 'loginA 200': (r) => r.status === 200 });
   check(loginB, { 'loginB 200': (r) => r.status === 200 });
 
-  const tokenA = loginA.json('data.accessToken');
-  const tokenB = loginB.json('data.accessToken');
+  const tokenA = loginA && loginA.status === 200 ? loginA.json('data.accessToken') : null;
+  const tokenB = loginB && loginB.status === 200 ? loginB.json('data.accessToken') : null;
+
+  if (!userBId || !tokenA || !tokenB) {
+    return;
+  }
+
   const authA = { ...JSON_HEADERS, Authorization: `Bearer ${tokenA}` };
   const authB = { ...JSON_HEADERS, Authorization: `Bearer ${tokenB}` };
 
@@ -100,7 +105,10 @@ export default function () {
     { headers: authA }
   );
   check(sessRes, { 'create session 201': (r) => r.status === 201 });
-  const sessionId = sessRes.json('data.id');
+  const sessionId = sessRes && sessRes.status === 201 ? sessRes.json('data.id') : null;
+  if (!sessionId) {
+    return;
+  }
 
   const ciA = http.post(`${BASE_URL}/api/v1/sessions/${sessionId}/check-in`, '{}', { headers: authA });
   const ciB = http.post(`${BASE_URL}/api/v1/sessions/${sessionId}/check-in`, '{}', { headers: authB });
