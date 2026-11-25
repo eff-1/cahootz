@@ -28,8 +28,8 @@ export default function () {
   const iter = __ITER;
   const emailA = `k6.host.${vuId}.${iter}@live.unilag.edu.ng`;
   const emailB = `k6.partner.${vuId}.${iter}@live.unilag.edu.ng`;
-  const ipHeaderA = { ...JSON_HEADERS, 'X-Forwarded-For': `10.100.${Math.floor(vuId / 250)}.${vuId % 250}` };
-  const ipHeaderB = { ...JSON_HEADERS, 'X-Forwarded-For': `10.101.${Math.floor(vuId / 250)}.${vuId % 250}` };
+  const ipHeaderA = { ...JSON_HEADERS, 'X-Forwarded-For': `10.100.${vuId % 250}.${iter % 250}` };
+  const ipHeaderB = { ...JSON_HEADERS, 'X-Forwarded-For': `10.101.${vuId % 250}.${iter % 250}` };
 
   // 1. Register & Login Host (A) and Partner (B)
   const regA = http.post(
